@@ -85,12 +85,13 @@ PEPPER = str(AUTH.get("pepper") or "")
 # =========================================================
 # cookie manager
 # =========================================================
-@st.cache_resource(show_spinner=False)
 def get_cookie_manager():
     if stx is None:
         return None
     try:
-        return stx.CookieManager()
+        if "_frontgate_cookie_manager" not in st.session_state:
+            st.session_state["_frontgate_cookie_manager"] = stx.CookieManager()
+        return st.session_state["_frontgate_cookie_manager"]
     except Exception:
         return None
 
