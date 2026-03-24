@@ -236,6 +236,20 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+
+
+def ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+        except Exception:
+            return None
+    if getattr(dt, "tzinfo", None) is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
 def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
 
@@ -402,11 +416,13 @@ def validate_session(raw_token: str) -> Optional[Dict[str, Any]]:
     if not doc:
         return None
     now = utcnow()
-    if doc.get("revoked_at") or doc.get("expires_at") is None or doc["expires_at"] < now:
+    expires_at = ensure_utc(doc.get("expires_at"))
+    revoked_at = ensure_utc(doc.get("revoked_at"))
+    if revoked_at or expires_at is None or expires_at < now:
         sessions.update_one({"_id": doc["_id"]}, {"$set": {"is_active": False, "revoked_at": now, "delete_after": now + timedelta(days=1)}})
         return None
     idle_minutes = int(AUTH.get("session_idle_minutes", 120))
-    last_seen = doc.get("last_seen_at") or doc.get("created_at") or now
+    last_seen = ensure_utc(doc.get("last_seen_at")) or ensure_utc(doc.get("created_at")) or now
     if last_seen + timedelta(minutes=idle_minutes) < now:
         sessions.update_one({"_id": doc["_id"]}, {"$set": {"is_active": False, "revoked_at": now, "delete_after": now + timedelta(days=1)}})
         return None
