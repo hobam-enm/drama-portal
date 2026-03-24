@@ -1294,7 +1294,7 @@ def render_sidebar(user: Dict[str, Any]):
 render_login_finalize()
 
 user = get_current_user()
-render_header(user)
+current_app = str(st.query_params.get("app", "home") or "home")
 
 if not mongo_available():
     st.warning("MongoDB 연결이 없어 중앙 세션/가입요청/관리자 기능 일부가 제한됩니다. 통합 secrets의 [mongo].uri를 확인하세요.")
@@ -1302,6 +1302,7 @@ if not PEPPER:
     st.warning("auth.pepper 가 비어 있어 계정 비밀번호 검증이 정상 동작하지 않을 수 있습니다.")
 
 if user is None:
+    render_header(None)
     c1, c2 = st.columns([1, 1])
     with c1:
         render_login_panel()
@@ -1313,9 +1314,9 @@ if user and user.get("session_token") and st.session_state.get("_frontgate_ls_sy
     inject_local_storage_set(str(user.get("session_token")))
     st.session_state["_frontgate_ls_synced"] = str(user.get("session_token"))
 
-current_app = str(st.query_params.get("app", "home") or "home")
 if current_app == "data_dashboard":
     if not (is_admin(user) or ("data_dashboard" in set(user.get("allowed_apps") or []))):
+        render_header(user)
         st.error("데이터 대시보드 접근 권한이 없습니다.")
         if st.button("서비스 홈으로 돌아가기", use_container_width=True):
             st.query_params["app"] = "home"
@@ -1324,6 +1325,7 @@ if current_app == "data_dashboard":
     render_dashboard_page(user)
     st.stop()
 
+render_header(user)
 render_sidebar(user)
 admin_page = get_admin_page() if is_admin(user) else ""
 if admin_page:
