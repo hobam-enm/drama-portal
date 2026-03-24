@@ -502,18 +502,18 @@ def get_signup_requests(status: Optional[str] = None) -> List[Dict[str, Any]]:
     return list(coll("signup_requests_coll").find(q).sort("requested_at", -1))
 
 
-def approve_request(req: Dict[str, Any], admin_user: Dict[str, Any]):
+def approve_request(req: Dict[str, Any], admin_user: Dict[str, Any], allowed_apps: List[str], role: Optional[str] = None, permissions: Optional[List[str]] = None):
     login_id = str(req.get("login_id"))
     user_doc = {
         "id": login_id,
         "name": str(req.get("name") or login_id),
         "email": str(req.get("email") or ""),
         "department": str(req.get("department") or ""),
-        "role": AUTH["default_role"],
+        "role": role or AUTH["default_role"],
         "pw_hash": str(req.get("pw_hash") or ""),
         "active": True,
-        "allowed_apps": list(req.get("requested_apps") or []),
-        "permissions": [],
+        "allowed_apps": list(allowed_apps or []),
+        "permissions": list(permissions or []),
         "created_at": utcnow(),
         "approved_at": utcnow(),
         "approved_by": str(admin_user.get("id")),
@@ -522,7 +522,14 @@ def approve_request(req: Dict[str, Any], admin_user: Dict[str, Any]):
     users_c.update_one({"id": login_id}, {"$set": user_doc}, upsert=True)
     coll("signup_requests_coll").update_one(
         {"_id": req["_id"]},
-        {"$set": {"status": "approved", "reviewed_at": utcnow(), "reviewed_by": str(admin_user.get("id"))}},
+        {"$set": {
+            "status": "approved",
+            "reviewed_at": utcnow(),
+            "reviewed_by": str(admin_user.get("id")),
+            "approved_apps": list(allowed_apps or []),
+            "approved_role": role or AUTH["default_role"],
+            "approved_permissions": list(permissions or []),
+        }},
     )
 
 
@@ -653,6 +660,17 @@ def toggle_user_active(user_id: str, active: bool):
     coll("users_coll").update_one({"id": user_id}, {"$set": {"active": active}})
 
 
+def update_user_access(user_id: str, allowed_apps: List[str], role: Optional[str] = None, permissions: Optional[List[str]] = None):
+    if not mongo_available():
+        return
+    update_doc = {"allowed_apps": list(allowed_apps or [])}
+    if role is not None:
+        update_doc["role"] = role
+    if permissions is not None:
+        update_doc["permissions"] = list(permissions or [])
+    coll("users_coll").update_one({"id": user_id}, {"$set": update_doc})
+
+
 # =========================================================
 # UI helpers
 # =========================================================
@@ -697,7 +715,7 @@ def build_cards_html(user: Dict[str, Any], keys: List[str]) -> str:
         meta = app_meta(key)
         img = str(img_map.get(key) or "https://images.unsplash.com/photo-1507842217343-583bb7270b66")
 
-        can_access = is_admin(user) or (not allowed) or (key in allowed)
+        can_access = is_admin(user) or (key in allowed)
         final_url = with_query_param(url, "auth", issue_handoff_token(user, key)) if can_access and SIGNING_SECRET else url
         state_badge = "접근 가능" if can_access else "권한 없음"
         badge_class = "ok" if can_access else "blocked"
@@ -867,77 +885,153 @@ def render_signup_panel():
         (st.success if ok else st.error)(msg)
 
 
+
 def render_admin_panel(admin_user: Dict[str, Any], container=None):
     ui = container if container is not None else st
     ui.markdown("### 🛠 관리자")
-    tab1, tab2 = ui.tabs(["가입 요청", "사용자 목록"])
+    tab1, tab2, tab3 = ui.tabs(["가입 요청", "비밀번호 재설정", "멤버 관리"])
+
+    app_keys = [k for k in apps_config().keys() if k != "frontgate"]
+    app_labels = {k: app_meta(k)["title"] for k in app_keys}
+    permission_options = ["user_manage", "approve_signup", "session_manage", "ytan_admin"]
 
     with tab1:
-        reqs = get_signup_requests()
-        if not reqs:
-            st.info("대기 중인 요청이 없습니다.")
-        for req in reqs:
-            with st.expander(f"[{req.get('status')}] {req.get('name')} · {req.get('login_id')}"):
-                st.write(f"- 이메일: {req.get('email') or '-'}")
-                st.write(f"- 부서: {req.get('department') or '-'}")
-                st.write(f"- 요청 앱: {', '.join(req.get('requested_apps') or []) or '-'}")
-                st.write(f"- 사유: {req.get('reason') or '-'}")
-                st.write(f"- 요청시각: {req.get('requested_at')}")
-                if req.get("status") == "pending":
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        if st.button("승인", key=f"approve_{req['_id']}", use_container_width=True):
-                            approve_request(req, admin_user)
-                            st.success("승인 완료")
-                            st.rerun()
-                    with c2:
-                        note = st.text_input("반려 메모", key=f"rej_note_{req['_id']}")
-                        if st.button("반려", key=f"reject_{req['_id']}", use_container_width=True):
-                            reject_request(req["_id"], admin_user, note)
-                            st.success("반려 처리 완료")
-                            st.rerun()
+        reqs = get_signup_requests("pending")
+        signup_reqs = [r for r in reqs if str(r.get("type") or "signup") == "signup"]
+        if not signup_reqs:
+            ui.info("대기 중인 가입 요청이 없습니다.")
+        for req in signup_reqs:
+            req_id = str(req.get("_id"))
+            default_apps = list(req.get("requested_apps") or [])
+            with ui.expander(f"[대기] {req.get('name')} · {req.get('login_id')}"):
+                ui.write(f"- 이메일: {req.get('email') or '-'}")
+                ui.write(f"- 부서: {req.get('department') or '-'}")
+                ui.write(f"- 요청 앱: {', '.join(default_apps) or '-'}")
+                ui.write(f"- 사유: {req.get('reason') or '-'}")
+                ui.write(f"- 요청시각: {req.get('requested_at')}")
+                selected_apps = ui.multiselect(
+                    "승인할 접근 가능 서비스",
+                    app_keys,
+                    default=default_apps,
+                    format_func=lambda x: app_labels.get(x, x),
+                    key=f"approve_apps_{req_id}",
+                )
+                approved_role = ui.selectbox(
+                    "권한",
+                    [AUTH["default_role"], AUTH["admin_role_name"]],
+                    index=0,
+                    key=f"approve_role_{req_id}",
+                )
+                approved_permissions = ui.multiselect(
+                    "추가 권한",
+                    permission_options,
+                    default=[],
+                    key=f"approve_perms_{req_id}",
+                )
+                c1, c2 = ui.columns(2)
+                with c1:
+                    if ui.button("승인", key=f"approve_{req_id}", use_container_width=True):
+                        approve_request(req, admin_user, allowed_apps=selected_apps, role=approved_role, permissions=approved_permissions)
+                        ui.success("승인 완료")
+                        st.rerun()
+                with c2:
+                    note = ui.text_input("반려 메모", key=f"rej_note_{req_id}")
+                    if ui.button("반려", key=f"reject_{req_id}", use_container_width=True):
+                        reject_request(req["_id"], admin_user, note)
+                        ui.success("반려 처리 완료")
+                        st.rerun()
 
     with tab2:
+        reqs = get_signup_requests("pending")
+        pw_reqs = [r for r in reqs if str(r.get("type") or "") == "password_reset"]
+        if not pw_reqs:
+            ui.info("대기 중인 비밀번호 재설정 요청이 없습니다.")
+        for req in pw_reqs:
+            req_id = str(req.get("_id"))
+            with ui.expander(f"[대기] 비밀번호 재설정 · {req.get('login_id')}"):
+                ui.write(f"- 이름: {req.get('name') or '-'}")
+                ui.write(f"- 이메일: {req.get('email') or '-'}")
+                ui.write(f"- 메모: {req.get('reason') or '-'}")
+                ui.write(f"- 요청시각: {req.get('requested_at')}")
+                c1, c2 = ui.columns(2)
+                with c1:
+                    if ui.button("승인", key=f"pw_approve_{req_id}", use_container_width=True):
+                        approve_password_reset_request(req, admin_user)
+                        ui.success("재설정 승인 완료")
+                        st.rerun()
+                with c2:
+                    note = ui.text_input("반려 메모", key=f"pw_rej_note_{req_id}")
+                    if ui.button("반려", key=f"pw_reject_{req_id}", use_container_width=True):
+                        reject_request(req["_id"], admin_user, note)
+                        ui.success("반려 처리 완료")
+                        st.rerun()
+
+    with tab3:
         users = list_users()
         if not users:
-            st.info("사용자가 없습니다.")
+            ui.info("사용자가 없습니다.")
+
+        with ui.expander("새 계정 생성", expanded=False):
+            with ui.form("admin_create_user_form", clear_on_submit=True):
+                login_id = st.text_input("아이디 *", key="admin_create_login_id")
+                name = st.text_input("이름 *", key="admin_create_name")
+                password = st.text_input("비밀번호 *", type="password", key="admin_create_password")
+                password_confirm = st.text_input("비밀번호 확인 *", type="password", key="admin_create_password_confirm")
+                email = st.text_input("이메일", key="admin_create_email")
+                department = st.text_input("부서", key="admin_create_department")
+                role = st.selectbox("권한", [AUTH["default_role"], AUTH["admin_role_name"]], key="admin_create_role")
+                allowed_apps = st.multiselect("접근 가능 서비스", app_keys, format_func=lambda x: app_labels.get(x, x), key="admin_create_apps")
+                permissions = st.multiselect("추가 권한", permission_options, key="admin_create_permissions")
+                submitted = st.form_submit_button("계정 생성", use_container_width=True)
+            if submitted:
+                ok, msg = create_user_by_admin(admin_user, login_id, name, password, password_confirm, role, allowed_apps, permissions, email, department)
+                (ui.success if ok else ui.error)(msg)
+                if ok:
+                    st.rerun()
+
         for u in users:
             uid = str(u.get("id"))
-            with st.expander(f"{u.get('name') or uid} · {uid}"):
-                st.write(f"- role: {u.get('role', '-')}")
-                st.write(f"- active: {u.get('active', True)}")
-                st.write(f"- allowed_apps: {', '.join(u.get('allowed_apps') or []) or '-'}")
-                st.write(f"- permissions: {', '.join(u.get('permissions') or []) or '-'}")
-                if mongo_available() and uid != str(admin_user.get("id")):
-                    currently_active = bool(u.get("active", True))
-                    label = "비활성화" if currently_active else "활성화"
-                    if st.button(label, key=f"toggle_{uid}"):
-                        toggle_user_active(uid, not currently_active)
-                        st.success("상태가 변경되었습니다.")
+            with ui.expander(f"{u.get('name') or uid} · {uid}"):
+                role_options = [AUTH["default_role"], AUTH["admin_role_name"]]
+                current_role = str(u.get("role") or AUTH["default_role"])
+                if current_role not in role_options:
+                    role_options.append(current_role)
+
+                new_role = ui.selectbox("권한", role_options, index=role_options.index(current_role), key=f"user_role_{uid}")
+                new_apps = ui.multiselect(
+                    "접근 가능 서비스",
+                    app_keys,
+                    default=list(u.get("allowed_apps") or []),
+                    format_func=lambda x: app_labels.get(x, x),
+                    key=f"user_apps_{uid}",
+                )
+                new_perms = ui.multiselect(
+                    "추가 권한",
+                    permission_options,
+                    default=[p for p in list(u.get("permissions") or []) if p in permission_options],
+                    key=f"user_perms_{uid}",
+                )
+                c1, c2 = ui.columns(2)
+                with c1:
+                    if mongo_available() and ui.button("권한 저장", key=f"save_access_{uid}", use_container_width=True):
+                        update_user_access(uid, new_apps, role=new_role, permissions=new_perms)
+                        ui.success("접근 권한이 저장되었습니다.")
                         st.rerun()
+                with c2:
+                    if mongo_available() and uid != str(admin_user.get("id")):
+                        currently_active = bool(u.get("active", True))
+                        label = "비활성화" if currently_active else "활성화"
+                        if ui.button(label, key=f"toggle_{uid}", use_container_width=True):
+                            toggle_user_active(uid, not currently_active)
+                            ui.success("상태가 변경되었습니다.")
+                            st.rerun()
+                ui.caption(f"현재 상태: {'활성' if bool(u.get('active', True)) else '비활성'}")
 
 
 def render_sidebar(user: Dict[str, Any]):
     with st.sidebar:
-        st.markdown("## 🧭 포털 메뉴")
-        st.caption("로그인 정보와 관리 기능을 여기서 확인합니다.")
-        st.markdown(f"**사용자:** {user.get('name')}")
-        st.markdown(f"**아이디:** `{user.get('id')}`")
-        st.markdown(f"**권한:** `{user.get('role')}`")
-        perms = list(user.get("permissions") or [])
-        if perms:
-            st.caption("권한: " + ", ".join(perms))
-        if st.button("로그아웃", use_container_width=True):
-            logout_user()
-        st.divider()
         if is_admin(user):
             render_admin_panel(user, container=st.sidebar)
-        else:
-            allowed = list(user.get("allowed_apps") or [])
-            if allowed:
-                st.markdown("### 접근 가능 서비스")
-                for app_key in allowed:
-                    st.write(f"- {app_meta(app_key)['title']}")
 
 
 # =========================================================
