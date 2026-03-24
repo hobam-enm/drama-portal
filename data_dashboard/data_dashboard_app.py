@@ -390,28 +390,39 @@ def render_access_denied():
     if err:
         st.error(err)
     else:
-        st.warning("frontgate를 통해 로그인한 뒤 접근 가능한 서비스에서 진입해 주세요.")
+        st.warning("드라마 마케팅 대시보드를 통해 로그인한 뒤 다시 접근해 주세요.")
 
     fg_url = frontgate_url()
     if fg_url:
-        st.markdown(f"[frontgate로 이동]({fg_url})")
+        st.markdown(f"[드라마 마케팅 대시보드로 이동]({fg_url})")
     else:
         st.info("apps.frontgate URL이 secrets에 없으면 바로가기 링크를 표시할 수 없습니다.")
     st.stop()
 
 
+def render_sidebar_user_status(user: Dict[str, Any]):
+    name = str(user.get("name") or user.get("id") or "-")
+    user_id = str(user.get("id") or "-")
+    role = str(user.get("role") or "")
+    role_html = f"<div class='sidebar-user-meta'>권한: {role}</div>" if role else ""
+    st.sidebar.markdown(
+        f"""
+        <div class="sidebar-user-status-wrap">
+            <div class="sidebar-user-status-box">
+                <div class="sidebar-user-label">로그인 상태</div>
+                <div class="sidebar-user-name">{name}</div>
+                <div class="sidebar-user-meta">ID: {user_id}</div>
+                {role_html}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 CURRENT_USER = restore_current_user()
 if not CURRENT_USER or not user_can_access_app(CURRENT_USER, APP_KEY):
     render_access_denied()
-
-with st.sidebar:
-    st.markdown("---")
-    st.caption("접속 계정")
-    st.write(f"**{CURRENT_USER.get('name', CURRENT_USER.get('id', ''))}**")
-    st.caption(f"ID: {CURRENT_USER.get('id', '-')}")
-    if CURRENT_USER.get("role"):
-        st.caption(f"ROLE: {CURRENT_USER.get('role')}")
-    st.markdown("---")
 
 
 # =====================================================
@@ -530,6 +541,42 @@ section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
 }
 
 section[data-testid="stSidebar"] button svg { display: none !important; }
+
+
+.sidebar-user-status-wrap {
+    position: sticky;
+    bottom: 0;
+    padding-top: 24px;
+    margin-top: 28px;
+    background: linear-gradient(to top, white 72%, rgba(255,255,255,0));
+    z-index: 20;
+}
+
+.sidebar-user-status-box {
+    border-top: 1px solid rgba(0,0,0,0.08);
+    padding: 10px 2px 2px 2px;
+}
+
+.sidebar-user-label {
+    font-size: 11px;
+    color: #7a7a7a;
+    margin-bottom: 4px;
+    letter-spacing: -0.1px;
+}
+
+.sidebar-user-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: #222222;
+    line-height: 1.35;
+    margin-bottom: 2px;
+}
+
+.sidebar-user-meta {
+    font-size: 10.5px;
+    color: #7a7a7a;
+    line-height: 1.35;
+}
 
 /* 사이드바 텍스트 여백 */
 section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2, 
@@ -5336,4 +5383,6 @@ elif st.session_state["page"] == "성장스코어":
     render_growth_score() # [ 10. 페이지 5 (통합됨) ]
 else:
     render_overview() # 기본값으로 Overview 렌더링
+
+render_sidebar_user_status(CURRENT_USER)
     #endregion
