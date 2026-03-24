@@ -905,23 +905,38 @@ def build_cards_html(user: Dict[str, Any], keys: List[str]) -> str:
     allowed = set(user.get("allowed_apps") or [])
     img_map = app_images()
     url_map = apps_config()
+    internal_apps = {"data_dashboard", "chatbot", "yt_datacrawler"}
+    external_apps = {"insightlab", "ip_briefing"}
 
     for key in keys:
-        url = str(url_map.get(key) or "").strip()
-        if not url:
-            continue
         meta = app_meta(key)
         img = str(img_map.get(key) or "https://images.unsplash.com/photo-1507842217343-583bb7270b66")
-
         can_access = is_admin(user) or (key in allowed)
-        final_url = with_query_param(url, "auth", issue_handoff_token(user, key)) if can_access and SIGNING_SECRET else url
         state_badge = "접근 가능" if can_access else "권한 없음"
         badge_class = "ok" if can_access else "blocked"
-        href = final_url if can_access else "#"
-        target = "_blank" if can_access else "_self"
+
+        href = "#"
+        target = "_self"
+        rel = "noopener noreferrer"
+
+        if can_access:
+            if key in internal_apps:
+                href = f"?app={key}"
+                target = "_self"
+            elif key in external_apps:
+                url = str(url_map.get(key) or "").strip()
+                if url:
+                    href = url
+                    target = "_blank"
+            else:
+                url = str(url_map.get(key) or "").strip()
+                if url:
+                    href = url
+                    target = "_blank"
+
         html_parts.append(
             f"""
-            <a class="card-link {'disabled' if not can_access else ''}" href="{href}" target="{target}" rel="noopener noreferrer">
+            <a class="card-link {'disabled' if not can_access else ''}" href="{href}" target="{target}" rel="{rel}">
               <div class="card">
                 <div class="thumb-wrap"><img class="thumb" src="{img}" alt="{meta['title']}"></div>
                 <div class="body">
