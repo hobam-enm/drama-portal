@@ -19,6 +19,10 @@ from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 import gspread
 from google.oauth2.service_account import Credentials
 import extra_streamlit_components as stx
+try:
+    from streamlit_js_eval import streamlit_js_eval
+except Exception:
+    streamlit_js_eval = None
 from plotly import graph_objects as go
 #endregion
 
@@ -167,7 +171,7 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 }
 
 div[data-testid="stHorizontalBlock"] {
-    gap: 1.3rem !important;
+    gap: 1.05rem !important;
     align-items: stretch !important;
 }
 
@@ -176,32 +180,36 @@ div[data-testid="column"] {
     min-width: 0 !important;
 }
 
+div[data-testid="stHorizontalBlock"]:not(:has(.kpi-card)) {
+    margin-bottom: 0.45rem !important;
+}
+
 /* KPI 묶음 / 차트 묶음 간격 보강 */
 div[data-testid="stHorizontalBlock"]:has(.kpi-card) {
-    gap: 1.15rem !important;
-    margin-bottom: 1.15rem !important;
+    gap: 0.95rem !important;
+    margin-bottom: 0.9rem !important;
 }
 
 div[data-testid="stElementContainer"]:has(> .sec-title) {
-    margin-top: 0.55rem !important;
-    margin-bottom: 0.2rem !important;
+    margin-top: 1.05rem !important;
+    margin-bottom: 0.45rem !important;
 }
 
 div[data-testid="stElementContainer"]:has(> div[data-testid="stPlotlyChart"]),
 div[data-testid="stElementContainer"]:has(> .ag-theme-streamlit),
 div[data-testid="stElementContainer"]:has(> div[data-testid="stExpander"]) {
-    background: #ffffff;
-    border: 1px solid #e5e9f2;
+    background: #f3f6fb;
+    border: 1px solid #e1e7f2;
     border-radius: 18px;
-    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
-    padding: 14px 16px 12px 16px;
-    margin-bottom: 1.35rem !important;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.035);
+    padding: 20px 22px 18px 22px;
+    margin-bottom: 1.8rem !important;
     overflow: visible !important;
 }
 
 div[data-testid="stElementContainer"]:has(> div[data-testid="stExpander"]) {
-    padding-top: 4px;
-    padding-bottom: 4px;
+    padding-top: 6px;
+    padding-bottom: 6px;
 }
 
 h1, h2, h3 {
@@ -230,7 +238,7 @@ h1, h2, h3 {
     font-size: 18px;
     font-weight: 750;
     color: #18212f;
-    margin: 0.95rem 0 0.95rem 0;
+    margin: 1.25rem 0 1.05rem 0;
     padding: 0 0.15rem;
 }
 
@@ -238,8 +246,8 @@ h1, h2, h3 {
     background: #ffffff;
     border: 1px solid #e5e9f2;
     border-radius: 16px;
-    padding: 20px 18px;
-    min-height: 128px;
+    padding: 22px 18px;
+    min-height: 134px;
     height: 100%;
     display: flex;
     flex-direction: column;
@@ -334,7 +342,7 @@ div[data-testid="stExpander"] summary {
 }
 
 hr {
-    margin: 2rem 0 !important;
+    margin: 2.35rem 0 !important;
     border-color: #e5e7eb !important;
 }
 
@@ -384,7 +392,9 @@ def get_auth_cfg() -> Dict[str, Any]:
     cfg = dict(sget("auth", default={}) or {})
     cfg.setdefault("signing_secret", "")
     cfg.setdefault("cookie_name", "drama_portal_session")
+    cfg.setdefault("local_storage_key", "drama_portal_auth")
     cfg.setdefault("remember_me_days", 3)
+    cfg.setdefault("session_idle_minutes", 120)
     cfg.setdefault("admin_role_name", "admin")
     cfg.setdefault("default_role", "user")
     return cfg
@@ -404,6 +414,7 @@ MONGO = get_mongo_cfg()
 BASE_COOKIE_NAME = str(AUTH.get("cookie_name") or "drama_portal_session")
 APP_COOKIE_NAME = f"{BASE_COOKIE_NAME}__{APP_KEY}"
 SIGNING_SECRET = str(AUTH.get("signing_secret") or "")
+LOCAL_STORAGE_KEY = str(AUTH.get("local_storage_key") or "drama_portal_auth")
 COOKIE_EXPIRY_DAYS = int(AUTH.get("remember_me_days") or 3)
 
 
@@ -472,6 +483,20 @@ def set_cookie(name: str, value: str, days: int = COOKIE_EXPIRY_DAYS):
         pass
 
 
+def get_local_storage_token(seq: Optional[str] = None) -> str:
+    if streamlit_js_eval is None:
+        return ""
+    try:
+        key = f"dashboard_local_storage_token_{seq or uuid.uuid4().hex}"
+        value = streamlit_js_eval(
+            js_expressions=f"window.localStorage.getItem({json.dumps(LOCAL_STORAGE_KEY)})",
+            key=key,
+        )
+        return str(value or "")
+    except Exception:
+        return ""
+
+
 def get_mongo_db():
     uri = str(MONGO.get("uri") or "").strip()
     if not uri or MongoClient is None:
@@ -518,14 +543,28 @@ def validate_frontgate_session(raw_token: str) -> Optional[Dict[str, Any]]:
         doc = coll.find_one({"token_hash": token_hash(raw_token), "is_active": True})
         if not doc:
             return None
+        now = datetime.datetime.now(UTC)
         exp = doc.get("expires_at")
         if exp is not None:
             if getattr(exp, "tzinfo", None) is None:
                 exp = exp.replace(tzinfo=UTC)
             else:
                 exp = exp.astimezone(UTC)
-            if datetime.datetime.now(UTC) > exp:
+            if now > exp:
                 return None
+        last_seen = doc.get("last_seen_at") or doc.get("created_at")
+        if last_seen is not None:
+            if getattr(last_seen, "tzinfo", None) is None:
+                last_seen = last_seen.replace(tzinfo=UTC)
+            else:
+                last_seen = last_seen.astimezone(UTC)
+            idle_minutes = int(AUTH.get("session_idle_minutes") or 120)
+            if last_seen + datetime.timedelta(minutes=idle_minutes) < now:
+                return None
+            try:
+                coll.update_one({"_id": doc.get("_id")}, {"$set": {"last_seen_at": now}})
+            except Exception:
+                pass
         user = load_user_by_id(str(doc.get("user_id") or ""))
         if not user or not bool(user.get("active", True)):
             return None
@@ -608,13 +647,25 @@ def normalize_auth_payload(payload: Optional[Dict[str, Any]]) -> Optional[Dict[s
 def restore_from_frontgate_cookie() -> Optional[Dict[str, Any]]:
     raw = get_cookie(BASE_COOKIE_NAME)
     payload = validate_frontgate_session(raw)
-    if not payload:
-        return None
-    allowed = set(payload.get("allowed_apps") or [])
-    if allowed and APP_KEY not in allowed:
-        return None
-    persist_app_session(payload)
-    return payload
+    if payload:
+        allowed = set(payload.get("allowed_apps") or [])
+        if allowed and APP_KEY not in allowed:
+            return None
+        persist_app_session(payload)
+        return payload
+
+    # frontgate와 동일하게 localStorage에만 남아 있는 중앙 세션도 복구 시도
+    ls_token = get_local_storage_token(seq=f"boot_{int(st.session_state.get('_dashboard_restore_bootstrap_count', 0) or 0)}")
+    if ls_token and ls_token not in ("null", "undefined"):
+        payload = validate_frontgate_session(ls_token)
+        if payload:
+            allowed = set(payload.get("allowed_apps") or [])
+            if allowed and APP_KEY not in allowed:
+                return None
+            set_cookie(BASE_COOKIE_NAME, ls_token, days=COOKIE_EXPIRY_DAYS)
+            persist_app_session(payload)
+            return payload
+    return None
 
 
 def restore_from_app_cookie() -> Optional[Dict[str, Any]]:
@@ -705,25 +756,34 @@ def require_app_auth() -> Dict[str, Any]:
     if auth_ctx:
         return auth_ctx
 
-    # 1) Prefer the central frontgate session cookie for refresh continuity.
+    # 1) 중앙 frontgate 세션 복구 우선
     auth_ctx = restore_from_frontgate_cookie()
     if auth_ctx:
         st.session_state["dashboard_auth"] = auth_ctx
+        st.session_state["_dashboard_restore_bootstrap_count"] = 0
         return auth_ctx
 
-    # 2) Fall back to this app's own signed cookie.
+    # 2) 이 앱 자체 세션 복구
     auth_ctx = restore_from_app_cookie()
     if auth_ctx:
         st.session_state["dashboard_auth"] = auth_ctx
+        st.session_state["_dashboard_restore_bootstrap_count"] = 0
         return auth_ctx
 
-    # 3) If user just arrived from the main dashboard, accept the handoff immediately.
-    # Do not force a rerun here. Reruns at this point can create a loading loop if the
-    # auth query param is still present or the cookie component has not synced yet.
+    # 3) 방금 frontgate에서 넘어온 handoff 토큰 소비
     auth_ctx = consume_handoff()
     if auth_ctx:
         st.session_state["dashboard_auth"] = auth_ctx
+        st.session_state["_dashboard_restore_bootstrap_count"] = 0
         return auth_ctx
+
+    # 4) 하드 새로고침 직후 쿠키/로컬스토리지가 늦게 올라오는 상황 보정
+    bootstrap_count = int(st.session_state.get("_dashboard_restore_bootstrap_count", 0) or 0)
+    if bootstrap_count < 2:
+        st.session_state["_dashboard_restore_bootstrap_count"] = bootstrap_count + 1
+        get_cookie_manager()
+        get_local_storage_token(seq=f"bootstrap_{bootstrap_count}")
+        _rerun()
 
     render_auth_required_and_stop()
     return {}
@@ -756,8 +816,8 @@ DEMO_COLS_ORDER = [f"{d}남성" for d in DECADES] + [f"{d}여성" for d in DECAD
 
 # ===== Plotly 공통 테마 설정 =====
 dashboard_theme = go.Layout(
-    paper_bgcolor='rgba(0,0,0,0)',
-    plot_bgcolor='rgba(0,0,0,0)',
+    paper_bgcolor='#f7f8fc',
+    plot_bgcolor='#f7f8fc',
     font=dict(family='sans-serif', size=12, color='#333333'),
     title=dict(font=dict(size=16, color="#111"), x=0.05),
     legend=dict(
@@ -768,7 +828,7 @@ dashboard_theme = go.Layout(
         x=1,
         bgcolor='rgba(0,0,0,0)'
     ),
-    margin=dict(l=20, r=20, t=50, b=20),
+    margin=dict(l=26, r=26, t=56, b=28),
     xaxis=dict(
         showgrid=False, 
         zeroline=True, 
