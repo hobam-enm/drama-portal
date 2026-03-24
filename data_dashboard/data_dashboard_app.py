@@ -126,7 +126,11 @@ def verify_signed_payload(token: str) -> Optional[Dict[str, Any]]:
 
 
 def get_cookie_manager():
-    return stx.CookieManager(key="dmb_cookie_manager")
+    cm = st.session_state.get("_dmb_cookie_manager")
+    if cm is None:
+        cm = stx.CookieManager(key="dmb_cookie_manager")
+        st.session_state["_dmb_cookie_manager"] = cm
+    return cm
 
 
 def get_cookie(name: str) -> str:
