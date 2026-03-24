@@ -33,7 +33,7 @@ UTC = timezone.utc
 # =========================================================
 # page
 # =========================================================
-st.set_page_config(page_title="드라마 데이터 포털", page_icon="🧭", layout="wide")
+st.set_page_config(page_title="드라마 데이터 포털", page_icon="🧭", layout="wide", initial_sidebar_state="collapsed")
 
 
 # =========================================================
@@ -442,6 +442,14 @@ def is_admin(user: Optional[Dict[str, Any]]) -> bool:
     return "user_manage" in list(user.get("permissions") or []) or "approve_signup" in list(user.get("permissions") or [])
 
 
+def has_permission(user: Optional[Dict[str, Any]], permission: str) -> bool:
+    if not user:
+        return False
+    if is_admin(user):
+        return True
+    return permission in list(user.get("permissions") or [])
+
+
 # =========================================================
 # signup / admin
 # =========================================================
@@ -463,6 +471,7 @@ def submit_signup_request(name: str, login_id: str, password: str, password_conf
         return False, "이미 사용 중인 아이디입니다."
 
     req = {
+        "type": "signup",
         "name": name.strip(),
         "login_id": login_id,
         "pw_hash": pbkdf2_hash_password(password, PEPPER),
@@ -522,6 +531,109 @@ def reject_request(req_id, admin_user: Dict[str, Any], note: str):
         {"_id": req_id},
         {"$set": {"status": "rejected", "reviewed_at": utcnow(), "reviewed_by": str(admin_user.get("id")), "review_note": note}},
     )
+
+
+def submit_password_reset_request(login_id: str, name: str, email: str, reason: str) -> Tuple[bool, str]:
+    if not mongo_available():
+        return False, "MongoDB가 설정되지 않아 요청 저장이 불가합니다."
+    login_id = (login_id or "").strip()
+    if not login_id:
+        return False, "아이디를 입력하세요."
+    user = get_user_by_id(login_id)
+    if not user:
+        return False, "존재하지 않는 계정입니다."
+    c = coll("signup_requests_coll")
+    existing = c.find_one({"type": "password_reset", "login_id": login_id, "status": {"$in": ["pending", "approved"]}})
+    if existing:
+        return False, "이미 처리 중인 비밀번호 재설정 요청이 있습니다."
+    c.insert_one({
+        "type": "password_reset",
+        "login_id": login_id,
+        "name": (name or "").strip(),
+        "email": (email or "").strip(),
+        "reason": (reason or "").strip(),
+        "status": "pending",
+        "requested_at": utcnow(),
+        "reviewed_at": None,
+        "reviewed_by": None,
+        "review_note": None,
+    })
+    return True, "비밀번호 재설정 요청이 접수되었습니다. 관리자 승인 후 로그인 화면에서 새 비밀번호를 설정할 수 있습니다."
+
+
+def approve_password_reset_request(req: Dict[str, Any], admin_user: Dict[str, Any]):
+    login_id = str(req.get("login_id") or "")
+    if not mongo_available() or not login_id:
+        return
+    coll("users_coll").update_one(
+        {"id": login_id},
+        {"$set": {"must_change_password": True, "password_reset_approved_at": utcnow(), "password_reset_approved_by": str(admin_user.get("id"))}},
+    )
+    coll("signup_requests_coll").update_one(
+        {"_id": req["_id"]},
+        {"$set": {"status": "approved", "reviewed_at": utcnow(), "reviewed_by": str(admin_user.get("id"))}},
+    )
+
+
+def complete_password_reset(login_id: str, new_password: str, password_confirm: str) -> Tuple[bool, str]:
+    if not mongo_available():
+        return False, "MongoDB가 설정되지 않아 비밀번호 변경이 불가합니다."
+    login_id = (login_id or "").strip()
+    if not login_id or not new_password or not password_confirm:
+        return False, "아이디와 새 비밀번호를 모두 입력하세요."
+    if new_password != password_confirm:
+        return False, "비밀번호 확인이 일치하지 않습니다."
+    if len(new_password) < 4:
+        return False, "비밀번호는 4자 이상으로 입력하세요."
+    user = coll("users_coll").find_one({"id": login_id})
+    if not user:
+        return False, "존재하지 않는 계정입니다."
+    if not bool(user.get("must_change_password", False)):
+        approved_reset = coll("signup_requests_coll").find_one({"type": "password_reset", "login_id": login_id, "status": "approved"})
+        if not approved_reset:
+            return False, "관리자 승인된 비밀번호 재설정 요청이 없습니다."
+    coll("users_coll").update_one(
+        {"id": login_id},
+        {"$set": {"pw_hash": pbkdf2_hash_password(new_password, PEPPER), "must_change_password": False, "password_updated_at": utcnow()}, "$unset": {"password_reset_approved_at": "", "password_reset_approved_by": ""}},
+    )
+    coll("signup_requests_coll").update_many(
+        {"type": "password_reset", "login_id": login_id, "status": "approved"},
+        {"$set": {"status": "completed", "completed_at": utcnow()}},
+    )
+    return True, "새 비밀번호가 설정되었습니다. 이제 새 비밀번호로 로그인하세요."
+
+
+def create_user_by_admin(admin_user: Dict[str, Any], login_id: str, name: str, password: str, password_confirm: str, role: str, allowed_apps: List[str], permissions: List[str], email: str, department: str) -> Tuple[bool, str]:
+    if not mongo_available():
+        return False, "MongoDB가 설정되지 않아 사용자 생성이 불가합니다."
+    login_id = (login_id or "").strip()
+    name = (name or "").strip()
+    if not login_id or not name:
+        return False, "아이디와 이름은 필수입니다."
+    if not password or password != password_confirm:
+        return False, "비밀번호와 비밀번호 확인이 일치해야 합니다."
+    if len(password) < 4:
+        return False, "비밀번호는 4자 이상으로 입력하세요."
+    users_c = coll("users_coll")
+    if users_c.find_one({"id": login_id}):
+        return False, "이미 사용 중인 아이디입니다."
+    users_c.insert_one({
+        "id": login_id,
+        "name": name,
+        "email": (email or "").strip(),
+        "department": (department or "").strip(),
+        "role": role or AUTH["default_role"],
+        "pw_hash": pbkdf2_hash_password(password, PEPPER),
+        "active": True,
+        "allowed_apps": list(allowed_apps or []),
+        "permissions": list(permissions or []),
+        "must_change_password": False,
+        "created_at": utcnow(),
+        "approved_at": utcnow(),
+        "approved_by": str(admin_user.get("id")),
+        "created_by": str(admin_user.get("id")),
+    })
+    return True, "사용자가 생성되었습니다."
 
 
 def list_users() -> List[Dict[str, Any]]:
@@ -681,21 +793,12 @@ def render_header(user: Optional[Dict[str, Any]]):
             text-align: center;
           }
           .grad-sub { text-align: center; opacity: .72; margin-top: 2px; }
-          .top-userbox {
-            display:flex; justify-content:center; gap:8px; align-items:center; margin:12px 0 4px 0;
-            font-size:.95rem; opacity:.85;
-          }
         </style>
         """,
         unsafe_allow_html=True,
     )
     st.markdown("<div class='grad-title'>드라마 데이터 포털</div>", unsafe_allow_html=True)
     st.markdown("<div class='grad-sub'>문의: 미디어)마케팅팀 데이터인사이트파트</div>", unsafe_allow_html=True)
-    if user:
-        st.markdown(
-            f"<div class='top-userbox'><span>👤 {user.get('name')}</span><span>·</span><span>{user.get('role')}</span></div>",
-            unsafe_allow_html=True,
-        )
     st.write("")
 
 
@@ -709,11 +812,39 @@ def render_login_panel():
     if submitted:
         ok, user, msg = authenticate_user(login_id.strip(), password)
         if ok and user:
-            login_user(user, remember=remember)
-            st.success("로그인되었습니다.")
-            st.rerun()
+            if bool(user.get("must_change_password", False)):
+                st.session_state["reset_target_login_id"] = str(user.get("id"))
+                st.info("관리자 승인이 완료되었습니다. 아래 '새 비밀번호 설정'에서 비밀번호를 다시 설정해 주세요.")
+            else:
+                login_user(user, remember=remember)
+                st.success("로그인되었습니다.")
+                st.rerun()
         else:
             st.error(msg or "로그인에 실패했습니다.")
+
+    with st.expander("비밀번호 재설정 요청", expanded=False):
+        with st.form("pw_reset_request_form", clear_on_submit=True):
+            login_id = st.text_input("아이디 *", key="pw_reset_req_login")
+            name = st.text_input("이름", key="pw_reset_req_name")
+            email = st.text_input("이메일", key="pw_reset_req_email")
+            reason = st.text_area("요청 메모", key="pw_reset_req_reason", height=90, placeholder="예: 비밀번호 분실")
+            submitted = st.form_submit_button("재설정 요청 보내기", use_container_width=True)
+        if submitted:
+            ok, msg = submit_password_reset_request(login_id, name, email, reason)
+            (st.success if ok else st.error)(msg)
+
+    with st.expander("새 비밀번호 설정", expanded=bool(st.session_state.get("reset_target_login_id"))):
+        default_login = st.session_state.get("reset_target_login_id", "")
+        with st.form("pw_reset_complete_form", clear_on_submit=True):
+            login_id = st.text_input("아이디 *", value=default_login, key="pw_reset_complete_login")
+            new_password = st.text_input("새 비밀번호 *", type="password")
+            password_confirm = st.text_input("새 비밀번호 확인 *", type="password")
+            submitted = st.form_submit_button("비밀번호 변경", use_container_width=True)
+        if submitted:
+            ok, msg = complete_password_reset(login_id, new_password, password_confirm)
+            if ok:
+                st.session_state.pop("reset_target_login_id", None)
+            (st.success if ok else st.error)(msg)
 
 
 def render_signup_panel():
@@ -831,8 +962,11 @@ if user is None:
     st.stop()
 
 render_sidebar(user)
-st.caption("로그인 완료. 권한이 있는 서비스만 활성화되어 보입니다.")
 render_card_rows(user)
+
+st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+if st.button("로그아웃", use_container_width=True):
+    logout_user()
 
 st.markdown("<hr style='margin-top:30px; opacity:.2;'>", unsafe_allow_html=True)
 st.markdown("<p style='text-align:center; opacity:.65;'>© 드라마 데이터 포털</p>", unsafe_allow_html=True)
