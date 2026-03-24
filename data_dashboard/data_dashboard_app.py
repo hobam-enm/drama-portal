@@ -208,9 +208,23 @@ def build_dashboard_session(user: Dict[str, Any], sid: str = "") -> str:
     return sign_payload(payload)
 
 
+def normalize_auth_payload(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not payload:
+        return None
+    p = dict(payload)
+    if not p.get("permissions") and p.get("perms"):
+        p["permissions"] = list(p.get("perms") or [])
+    if not p.get("allowed_apps") and p.get("apps"):
+        p["allowed_apps"] = list(p.get("apps") or [])
+    email = str(p.get("email") or p.get("login_id") or p.get("sub") or "").strip().lower()
+    if email:
+        p["email"] = email
+    return p
+
+
 def restore_from_cookie() -> Optional[Dict[str, Any]]:
     token = get_cookie(COOKIE_NAME)
-    payload = verify_signed_payload(token)
+    payload = normalize_auth_payload(verify_signed_payload(token))
     if not payload:
         return None
     if payload.get("typ") != "app_session" or payload.get("app") != APP_KEY:
@@ -239,7 +253,7 @@ def consume_handoff() -> Optional[Dict[str, Any]]:
     token = str(q.get("auth") or "").strip()
     if not token:
         return None
-    payload = verify_signed_payload(token)
+    payload = normalize_auth_payload(verify_signed_payload(token))
     if not payload:
         st.session_state["dashboard_auth_error"] = "로그인 정보가 만료되었거나 유효하지 않습니다. 드라마 마케팅 대시보드에서 다시 접속해 주세요."
         return None
@@ -260,7 +274,10 @@ def consume_handoff() -> Optional[Dict[str, Any]]:
             return None
         dashboard_token = build_dashboard_session(user, sid=sid)
         set_cookie(COOKIE_NAME, dashboard_token, days=COOKIE_EXPIRY_DAYS)
-        payload = verify_signed_payload(dashboard_token) or payload
+        payload = normalize_auth_payload(verify_signed_payload(dashboard_token)) or normalize_auth_payload(payload) or payload
+    else:
+        # frontgate handoff payload may not include email/sid for DB lookup; keep session alive for this run
+        payload = normalize_auth_payload(payload) or payload
     try:
         del q["auth"]
     except Exception:
@@ -292,13 +309,19 @@ def render_auth_required_and_stop():
 
 
 def require_app_auth() -> Dict[str, Any]:
+    auth_ctx = st.session_state.get("dashboard_auth")
+    if auth_ctx:
+        return auth_ctx
     auth_ctx = restore_from_cookie()
     if auth_ctx:
         return auth_ctx
     auth_ctx = consume_handoff()
     if auth_ctx:
         st.session_state["dashboard_auth"] = auth_ctx
-        _rerun()
+        # rerun only when we successfully persisted an app cookie
+        if get_cookie(COOKIE_NAME):
+            _rerun()
+        return auth_ctx
     render_auth_required_and_stop()
     return {}
 
