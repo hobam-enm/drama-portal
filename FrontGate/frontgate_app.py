@@ -445,15 +445,27 @@ def is_admin(user: Optional[Dict[str, Any]]) -> bool:
 # =========================================================
 # signup / admin
 # =========================================================
-def submit_signup_request(name: str, login_id: str, email: str, department: str, reason: str, requested_apps: List[str]) -> Tuple[bool, str]:
+def submit_signup_request(name: str, login_id: str, password: str, password_confirm: str, email: str, department: str, reason: str, requested_apps: List[str]) -> Tuple[bool, str]:
     if not mongo_available():
         return False, "MongoDB가 설정되지 않아 요청 저장이 불가합니다."
     if not name or not login_id:
         return False, "이름과 아이디는 필수입니다."
+    if not password or not password_confirm:
+        return False, "비밀번호와 비밀번호 확인을 입력하세요."
+    if password != password_confirm:
+        return False, "비밀번호 확인이 일치하지 않습니다."
+    if len(password) < 4:
+        return False, "비밀번호는 4자 이상으로 입력하세요."
+
+    login_id = login_id.strip()
+    users_c = coll("users_coll")
+    if users_c.find_one({"id": login_id}):
+        return False, "이미 사용 중인 아이디입니다."
 
     req = {
         "name": name.strip(),
-        "login_id": login_id.strip(),
+        "login_id": login_id,
+        "pw_hash": pbkdf2_hash_password(password, PEPPER),
         "email": email.strip(),
         "department": department.strip(),
         "reason": reason.strip(),
@@ -469,7 +481,7 @@ def submit_signup_request(name: str, login_id: str, email: str, department: str,
     if existing:
         return False, "이미 대기 중인 요청이 있습니다."
     c.insert_one(req)
-    return True, "접근 요청이 접수되었습니다."
+    return True, "접근 요청이 접수되었습니다. 승인 후 해당 비밀번호로 로그인할 수 있습니다."
 
 
 def get_signup_requests(status: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -481,7 +493,7 @@ def get_signup_requests(status: Optional[str] = None) -> List[Dict[str, Any]]:
     return list(coll("signup_requests_coll").find(q).sort("requested_at", -1))
 
 
-def approve_request(req: Dict[str, Any], admin_user: Dict[str, Any], temp_password: str):
+def approve_request(req: Dict[str, Any], admin_user: Dict[str, Any]):
     login_id = str(req.get("login_id"))
     user_doc = {
         "id": login_id,
@@ -489,7 +501,7 @@ def approve_request(req: Dict[str, Any], admin_user: Dict[str, Any], temp_passwo
         "email": str(req.get("email") or ""),
         "department": str(req.get("department") or ""),
         "role": AUTH["default_role"],
-        "pw_hash": pbkdf2_hash_password(temp_password, PEPPER),
+        "pw_hash": str(req.get("pw_hash") or ""),
         "active": True,
         "allowed_apps": list(req.get("requested_apps") or []),
         "permissions": [],
@@ -689,7 +701,6 @@ def render_header(user: Optional[Dict[str, Any]]):
 
 def render_login_panel():
     st.markdown("### 🔐 포털 로그인")
-    fallback = str(AUTH.get("frontpage_password") or "")
     with st.form("login_form", clear_on_submit=False):
         login_id = st.text_input("아이디", placeholder="예: hbkim")
         password = st.text_input("비밀번호", type="password")
@@ -701,42 +712,34 @@ def render_login_panel():
             login_user(user, remember=remember)
             st.success("로그인되었습니다.")
             st.rerun()
-        elif fallback and not login_id.strip() and hmac.compare_digest(password, fallback):
-            pseudo_user = {
-                "id": "front_fallback",
-                "name": "임시 관리자",
-                "role": AUTH["admin_role_name"],
-                "active": True,
-                "allowed_apps": list(apps_config().keys()),
-                "permissions": ["user_manage", "approve_signup", "session_manage", "ytan_admin"],
-            }
-            login_user(pseudo_user, remember=remember)
-            st.success("과도기 비밀번호로 입장했습니다.")
-            st.rerun()
         else:
             st.error(msg or "로그인에 실패했습니다.")
 
 
 def render_signup_panel():
     st.markdown("### 📨 접근 요청")
+    st.caption("비밀번호는 사용자가 직접 정하고, 관리자는 요청 승인만 합니다.")
     app_keys = [k for k in apps_config().keys() if k != "frontgate"]
     labels = {k: app_meta(k)["title"] for k in app_keys}
     with st.form("signup_request_form", clear_on_submit=True):
         name = st.text_input("이름 *")
         login_id = st.text_input("희망 아이디 *")
+        password = st.text_input("비밀번호 *", type="password")
+        password_confirm = st.text_input("비밀번호 확인 *", type="password")
         email = st.text_input("이메일")
         department = st.text_input("부서")
         requested_apps = st.multiselect("사용 희망 서비스", app_keys, format_func=lambda x: labels.get(x, x))
         reason = st.text_area("사용 목적", height=120, placeholder="예: tvN 드라마 성과 모니터링 및 리포트 참고")
         submitted = st.form_submit_button("접근 요청 보내기", use_container_width=True)
     if submitted:
-        ok, msg = submit_signup_request(name, login_id, email, department, reason, requested_apps)
+        ok, msg = submit_signup_request(name, login_id, password, password_confirm, email, department, reason, requested_apps)
         (st.success if ok else st.error)(msg)
 
 
-def render_admin_panel(admin_user: Dict[str, Any]):
-    st.markdown("### 🛠 관리자")
-    tab1, tab2 = st.tabs(["가입 요청", "사용자 목록"])
+def render_admin_panel(admin_user: Dict[str, Any], container=None):
+    ui = container if container is not None else st
+    ui.markdown("### 🛠 관리자")
+    tab1, tab2 = ui.tabs(["가입 요청", "사용자 목록"])
 
     with tab1:
         reqs = get_signup_requests()
@@ -752,14 +755,10 @@ def render_admin_panel(admin_user: Dict[str, Any]):
                 if req.get("status") == "pending":
                     c1, c2 = st.columns(2)
                     with c1:
-                        temp_pw = st.text_input("승인 시 임시 비밀번호", key=f"temp_pw_{req['_id']}", placeholder="임시 비밀번호 입력")
                         if st.button("승인", key=f"approve_{req['_id']}", use_container_width=True):
-                            if not temp_pw.strip():
-                                st.error("임시 비밀번호를 입력하세요.")
-                            else:
-                                approve_request(req, admin_user, temp_pw.strip())
-                                st.success("승인 완료")
-                                st.rerun()
+                            approve_request(req, admin_user)
+                            st.success("승인 완료")
+                            st.rerun()
                     with c2:
                         note = st.text_input("반려 메모", key=f"rej_note_{req['_id']}")
                         if st.button("반려", key=f"reject_{req['_id']}", use_container_width=True):
@@ -787,6 +786,29 @@ def render_admin_panel(admin_user: Dict[str, Any]):
                         st.rerun()
 
 
+def render_sidebar(user: Dict[str, Any]):
+    with st.sidebar:
+        st.markdown("## 🧭 포털 메뉴")
+        st.caption("로그인 정보와 관리 기능을 여기서 확인합니다.")
+        st.markdown(f"**사용자:** {user.get('name')}")
+        st.markdown(f"**아이디:** `{user.get('id')}`")
+        st.markdown(f"**권한:** `{user.get('role')}`")
+        perms = list(user.get("permissions") or [])
+        if perms:
+            st.caption("권한: " + ", ".join(perms))
+        if st.button("로그아웃", use_container_width=True):
+            logout_user()
+        st.divider()
+        if is_admin(user):
+            render_admin_panel(user, container=st.sidebar)
+        else:
+            allowed = list(user.get("allowed_apps") or [])
+            if allowed:
+                st.markdown("### 접근 가능 서비스")
+                for app_key in allowed:
+                    st.write(f"- {app_meta(app_key)['title']}")
+
+
 # =========================================================
 # main
 # =========================================================
@@ -808,19 +830,9 @@ if user is None:
         render_signup_panel()
     st.stop()
 
-# top actions
-left, right = st.columns([8, 2])
-with left:
-    st.caption("로그인 완료. 권한이 있는 서비스만 활성화되어 보입니다.")
-with right:
-    if st.button("로그아웃", use_container_width=True):
-        logout_user()
-
+render_sidebar(user)
+st.caption("로그인 완료. 권한이 있는 서비스만 활성화되어 보입니다.")
 render_card_rows(user)
-
-if is_admin(user):
-    st.divider()
-    render_admin_panel(user)
 
 st.markdown("<hr style='margin-top:30px; opacity:.2;'>", unsafe_allow_html=True)
 st.markdown("<p style='text-align:center; opacity:.65;'>© 드라마 데이터 포털</p>", unsafe_allow_html=True)
