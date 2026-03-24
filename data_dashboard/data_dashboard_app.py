@@ -31,6 +31,17 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# CSS 선주입: 인증 컴포넌트가 만들어지기 전에 핵심 레이아웃 스타일을 먼저 태운다.
+st.markdown("""
+<style>
+header[data-testid="stHeader"], div[data-testid="stDecoration"] {display:none !important;}
+[data-testid="stAppViewContainer"] {background-color:#f9fafb !important; background-image:none !important;}
+.block-container {padding-top:2rem; padding-bottom:5rem; max-width:1600px !important;}
+section[data-testid="stSidebar"] {background-color:#ffffff !important; border-right:1px solid #e0e0e0; box-shadow:4px 0 15px rgba(0,0,0,0.1); min-width:280px !important; max-width:280px !important; padding-top:1rem; padding-left:0 !important; padding-right:0 !important;}
+section[data-testid="stSidebar"] .block-container, section[data-testid="stSidebar"] [data-testid="stSidebarContent"] {padding-left:0 !important; padding-right:0 !important; width:100% !important;}
+</style>
+""", unsafe_allow_html=True)
+
 
 # =====================================================
 #endregion
@@ -81,7 +92,8 @@ def get_mongo_cfg() -> Dict[str, Any]:
 
 AUTH = get_auth_cfg()
 MONGO = get_mongo_cfg()
-COOKIE_NAME = str(AUTH.get("cookie_name") or "drama_portal_session")
+BASE_COOKIE_NAME = str(AUTH.get("cookie_name") or "drama_portal_session")
+APP_COOKIE_NAME = f"{BASE_COOKIE_NAME}__{APP_KEY}"
 SIGNING_SECRET = str(AUTH.get("signing_secret") or "")
 COOKIE_EXPIRY_DAYS = int(AUTH.get("remember_me_days") or 3)
 
@@ -173,6 +185,56 @@ def load_user_by_email(email: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def load_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
+    db = get_mongo_db()
+    if db is None or not user_id:
+        return None
+    try:
+        coll = db[str(MONGO.get("users_coll") or "users")]
+        return coll.find_one({"id": str(user_id)})
+    except Exception:
+        return None
+
+
+def token_hash(raw_token: str) -> str:
+    return hashlib.sha256((raw_token or "").encode("utf-8")).hexdigest()
+
+
+def validate_frontgate_session(raw_token: str) -> Optional[Dict[str, Any]]:
+    db = get_mongo_db()
+    if db is None or not raw_token:
+        return None
+    try:
+        coll = db[str(MONGO.get("sessions_coll") or "sessions")]
+        doc = coll.find_one({"token_hash": token_hash(raw_token), "is_active": True})
+        if not doc:
+            return None
+        exp = doc.get("expires_at")
+        if exp is not None:
+            if getattr(exp, "tzinfo", None) is None:
+                exp = exp.replace(tzinfo=UTC)
+            else:
+                exp = exp.astimezone(UTC)
+            if datetime.datetime.now(UTC) > exp:
+                return None
+        user = load_user_by_id(str(doc.get("user_id") or ""))
+        if not user or not bool(user.get("active", True)):
+            return None
+        return {
+            "typ": "frontgate_session",
+            "app": APP_KEY,
+            "email": str(user.get("email") or "").strip().lower(),
+            "name": str(user.get("name") or user.get("id") or ""),
+            "role": str(user.get("role") or AUTH.get("default_role") or "user"),
+            "permissions": list(user.get("permissions") or []),
+            "allowed_apps": list(user.get("allowed_apps") or []),
+            "front_session_token": raw_token,
+            "user_id": str(user.get("id") or ""),
+        }
+    except Exception:
+        return None
+
+
 def load_session_by_sid(sid: str) -> Optional[Dict[str, Any]]:
     db = get_mongo_db()
     if db is None or not sid:
@@ -195,21 +257,29 @@ def load_session_by_sid(sid: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def build_dashboard_session(user: Dict[str, Any], sid: str = "") -> str:
+def build_dashboard_session(auth_ctx: Dict[str, Any]) -> str:
     now_ts = int(time.time())
     payload = {
         "typ": "app_session",
         "app": APP_KEY,
-        "email": str(user.get("email") or "").strip().lower(),
-        "name": str(user.get("name") or ""),
-        "role": str(user.get("role") or AUTH.get("default_role") or "user"),
-        "permissions": list(user.get("permissions") or []),
-        "allowed_apps": list(user.get("allowed_apps") or []),
-        "sid": sid or str(user.get("session_id") or ""),
+        "email": str(auth_ctx.get("email") or "").strip().lower(),
+        "name": str(auth_ctx.get("name") or ""),
+        "role": str(auth_ctx.get("role") or AUTH.get("default_role") or "user"),
+        "permissions": list(auth_ctx.get("permissions") or []),
+        "allowed_apps": list(auth_ctx.get("allowed_apps") or []),
+        "user_id": str(auth_ctx.get("user_id") or ""),
         "iat": now_ts,
         "exp": now_ts + (COOKIE_EXPIRY_DAYS * 86400),
     }
     return sign_payload(payload)
+
+
+def persist_app_session(auth_ctx: Dict[str, Any]):
+    try:
+        token = build_dashboard_session(auth_ctx)
+        set_cookie(APP_COOKIE_NAME, token, days=COOKIE_EXPIRY_DAYS)
+    except Exception:
+        pass
 
 
 def normalize_auth_payload(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -226,8 +296,20 @@ def normalize_auth_payload(payload: Optional[Dict[str, Any]]) -> Optional[Dict[s
     return p
 
 
-def restore_from_cookie() -> Optional[Dict[str, Any]]:
-    token = get_cookie(COOKIE_NAME)
+def restore_from_frontgate_cookie() -> Optional[Dict[str, Any]]:
+    raw = get_cookie(BASE_COOKIE_NAME)
+    payload = validate_frontgate_session(raw)
+    if not payload:
+        return None
+    allowed = set(payload.get("allowed_apps") or [])
+    if allowed and APP_KEY not in allowed:
+        return None
+    persist_app_session(payload)
+    return payload
+
+
+def restore_from_app_cookie() -> Optional[Dict[str, Any]]:
+    token = get_cookie(APP_COOKIE_NAME)
     payload = normalize_auth_payload(verify_signed_payload(token))
     if not payload:
         return None
@@ -236,19 +318,6 @@ def restore_from_cookie() -> Optional[Dict[str, Any]]:
     allowed = set(payload.get("allowed_apps") or [])
     if allowed and APP_KEY not in allowed:
         return None
-    sid = str(payload.get("sid") or "")
-    email = str(payload.get("email") or "").strip().lower()
-    session_doc = load_session_by_sid(sid) if sid else None
-    if sid and session_doc is None:
-        return None
-    user = load_user_by_email(email) if email else None
-    if user:
-        token2 = build_dashboard_session(user, sid=sid)
-        set_cookie(COOKIE_NAME, token2, days=COOKIE_EXPIRY_DAYS)
-        payload["name"] = str(user.get("name") or payload.get("name") or "")
-        payload["role"] = str(user.get("role") or payload.get("role") or "user")
-        payload["permissions"] = list(user.get("permissions") or payload.get("permissions") or [])
-        payload["allowed_apps"] = list(user.get("allowed_apps") or payload.get("allowed_apps") or [])
     return payload
 
 
@@ -276,12 +345,22 @@ def consume_handoff() -> Optional[Dict[str, Any]]:
         if allowed2 and APP_KEY not in allowed2:
             st.session_state["dashboard_auth_error"] = "이 계정은 드라마 성과 대시보드 접근 권한이 없습니다."
             return None
-        dashboard_token = build_dashboard_session(user, sid=sid)
-        set_cookie(COOKIE_NAME, dashboard_token, days=COOKIE_EXPIRY_DAYS)
-        payload = normalize_auth_payload(verify_signed_payload(dashboard_token)) or normalize_auth_payload(payload) or payload
+        payload = {
+            "typ": "frontgate_handoff",
+            "app": APP_KEY,
+            "email": str(user.get("email") or email or "").strip().lower(),
+            "name": str(user.get("name") or payload.get("name") or ""),
+            "role": str(user.get("role") or payload.get("role") or AUTH.get("default_role") or "user"),
+            "permissions": list(user.get("permissions") or payload.get("permissions") or []),
+            "allowed_apps": list(user.get("allowed_apps") or payload.get("allowed_apps") or []),
+            "user_id": str(user.get("id") or ""),
+        }
+        persist_app_session(payload)
     else:
-        # frontgate handoff payload may not include email/sid for DB lookup; keep session alive for this run
         payload = normalize_auth_payload(payload) or payload
+        payload["typ"] = "frontgate_handoff"
+        payload["app"] = APP_KEY
+        persist_app_session(payload)
     try:
         del q["auth"]
     except Exception:
@@ -317,13 +396,19 @@ def require_app_auth() -> Dict[str, Any]:
     if auth_ctx:
         return auth_ctx
 
-    # 1) Prefer an existing app cookie for refresh continuity.
-    auth_ctx = restore_from_cookie()
+    # 1) Prefer the central frontgate session cookie for refresh continuity.
+    auth_ctx = restore_from_frontgate_cookie()
     if auth_ctx:
         st.session_state["dashboard_auth"] = auth_ctx
         return auth_ctx
 
-    # 2) If user just arrived from the main dashboard, accept the handoff immediately.
+    # 2) Fall back to this app's own signed cookie.
+    auth_ctx = restore_from_app_cookie()
+    if auth_ctx:
+        st.session_state["dashboard_auth"] = auth_ctx
+        return auth_ctx
+
+    # 3) If user just arrived from the main dashboard, accept the handoff immediately.
     # Do not force a rerun here. Reruns at this point can create a loading loop if the
     # auth query param is still present or the cookie component has not synced yet.
     auth_ctx = consume_handoff()
@@ -333,10 +418,6 @@ def require_app_auth() -> Dict[str, Any]:
 
     render_auth_required_and_stop()
     return {}
-
-
-AUTH_CTX = require_app_auth()
-st.session_state["dashboard_auth"] = AUTH_CTX
 
 
 # =====================================================
@@ -608,6 +689,10 @@ div[data-testid="column"]:has(.rank-help-wrap:hover) {
 
 </style>
 """, unsafe_allow_html=True)
+
+AUTH_CTX = require_app_auth()
+st.session_state["dashboard_auth"] = AUTH_CTX
+
 
 
 # =====================================================
