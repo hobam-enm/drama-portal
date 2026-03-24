@@ -4,13 +4,15 @@ import base64
 import hashlib
 import hmac
 import json
+import uuid
 import os
+import time
 import secrets as py_secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
-import uuid
+
 import streamlit as st
 from streamlit.components.v1 import html as st_html
 
@@ -181,7 +183,6 @@ def inject_browser_session_set(token: str, days: int = 3):
             const encoded = encodeURIComponent({safe_token});
             document.cookie = {cookie_name} + "=" + encoded + "; path=/; max-age={max_age}; SameSite=Lax; Secure";
         }} catch (e) {{}}
-        setTimeout(function() {{ window.location.reload(); }}, 1100);
         </script>
         """,
         height=0,
@@ -524,6 +525,7 @@ def get_current_user() -> Optional[Dict[str, Any]]:
             if user:
                 st.session_state["current_user"] = user
                 st.session_state["_restore_bootstrap_count"] = 0
+                st.session_state["_show_restore_splash"] = False
                 st.session_state.pop("_pending_login_finalize", None)
                 return user
 
@@ -536,14 +538,17 @@ def get_current_user() -> Optional[Dict[str, Any]]:
                 st.session_state["current_user"] = user
                 st.session_state["_frontgate_ls_synced"] = ls_token
                 st.session_state["_restore_bootstrap_count"] = 0
+                st.session_state["_show_restore_splash"] = False
                 st.session_state.pop("_pending_login_finalize", None)
                 return user
 
         if bootstrap_count < 2:
             st.session_state["_restore_bootstrap_count"] = bootstrap_count + 1
+            st.session_state["_show_restore_splash"] = True
             get_cookie_manager()
             get_local_storage_token(seq=f"bootstrap_{bootstrap_count}")
             st.rerun()
+        st.session_state["_show_restore_splash"] = False
 
     # 과도기 fallback: front password or ?key=
     qs_key = str(st.query_params.get("key", "") or "")
@@ -590,6 +595,7 @@ def login_user(user: Dict[str, Any], remember: bool):
             "token": str(current.get("session_token")),
             "days": int(AUTH.get("remember_me_days", 3)) if remember else 1,
         }
+        st.session_state["_pending_login_stage"] = 0
         st.session_state["_frontgate_ls_synced"] = str(current.get("session_token"))
 
 
@@ -602,8 +608,10 @@ def logout_user():
     inject_browser_session_remove()
     st.session_state.pop("current_user", None)
     st.session_state.pop("_pending_login_finalize", None)
+    st.session_state.pop("_pending_login_stage", None)
     st.session_state["_frontgate_restore_attempts"] = 0
     st.session_state["_frontgate_ls_synced"] = ""
+    st.session_state["_show_restore_splash"] = False
     st.rerun()
 
 
@@ -1010,16 +1018,30 @@ def render_header(user: Optional[Dict[str, Any]]):
 
 
 
+
+
+def render_restore_splash(message: str = "로그인 상태를 확인하고 있습니다."):
+    st.markdown("### 사이트 접속 중")
+    st.info(message)
+
+
 def render_login_finalize():
     pending = st.session_state.get("_pending_login_finalize") or {}
     token = str(pending.get("token") or "")
     if not token:
         return False
     days = int(pending.get("days") or int(AUTH.get("remember_me_days", 3) or 3))
+    stage = int(st.session_state.get("_pending_login_stage", 0) or 0)
     st.markdown("### 로그인 중")
     st.info("사이트에 접속하고 있습니다. 잠시만 기다려 주세요.")
-    inject_browser_session_set(token, days=days)
-    st.stop()
+    if stage == 0:
+        inject_browser_session_set(token, days=days)
+        st.session_state["_pending_login_stage"] = 1
+        time.sleep(1.0)
+        st.rerun()
+    st.session_state.pop("_pending_login_finalize", None)
+    st.session_state.pop("_pending_login_stage", None)
+    st.rerun()
 
 def render_login_panel():
     st.markdown("### 🔐 포털 로그인")
