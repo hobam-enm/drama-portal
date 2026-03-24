@@ -457,17 +457,34 @@ def get_current_user() -> Optional[Dict[str, Any]]:
         return st.session_state["current_user"]
 
     if mongo_available():
-        # CookieManager 값이 새로고침 직후 첫 렌더에서 늦게 들어오는 경우가 있어 1회 부트스트랩 rerun
-        if not st.session_state.get("_cookie_bootstrap_done"):
-            st.session_state["_cookie_bootstrap_done"] = True
-            get_cookie_manager()
-            st.rerun()
+        # 하드 새로고침 직후엔 쿠키/로컬스토리지가 첫 렌더에서 늦게 들어올 수 있어
+        # 최대 2회까지 부트스트랩 rerun 후 복구를 시도한다.
+        bootstrap_count = int(st.session_state.get("_restore_bootstrap_count", 0) or 0)
+
         cookie_token = get_cookie(COOKIE_NAME)
         if cookie_token:
             user = validate_session(cookie_token)
             if user:
                 st.session_state["current_user"] = user
+                st.session_state["_restore_bootstrap_count"] = 0
                 return user
+
+        ls_token = get_local_storage_token()
+        if ls_token and ls_token not in ("null", "undefined"):
+            user = validate_session(ls_token)
+            if user:
+                # localStorage에만 남아 있어도 쿠키를 재세팅해서 이후 복구를 안정화
+                set_cookie(COOKIE_NAME, ls_token, days=int(AUTH.get("remember_me_days", 3)))
+                st.session_state["current_user"] = user
+                st.session_state["_frontgate_ls_synced"] = ls_token
+                st.session_state["_restore_bootstrap_count"] = 0
+                return user
+
+        if bootstrap_count < 2:
+            st.session_state["_restore_bootstrap_count"] = bootstrap_count + 1
+            get_cookie_manager()
+            get_local_storage_token()
+            st.rerun()
 
     # 과도기 fallback: front password or ?key=
     qs_key = str(st.query_params.get("key", "") or "")
