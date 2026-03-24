@@ -21,3 +21,6 @@ certifi
 
 apscheduler
 pytz
+
+scikit-learn
+joblib

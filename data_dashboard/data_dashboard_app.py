@@ -50,8 +50,11 @@ html, body, [class*="css"] {
 }
 
 .block-container {
-    max-width: 1600px !important;
-    padding-top: 2rem !important;
+    max-width: none !important;
+    width: 100% !important;
+    padding-top: 1.75rem !important;
+    padding-right: 2.2rem !important;
+    padding-left: 2.2rem !important;
     padding-bottom: 4rem !important;
 }
 
@@ -154,17 +157,51 @@ section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p.sidebar-c
     padding: 0 14px;
 }
 
-/* 메인 래퍼는 투명하게 두고, 실제 컴포넌트를 직접 스타일링 */
+/* 메인 기본 간격 */
 div[data-testid="stVerticalBlockBorderWrapper"] {
     background: transparent !important;
     border: none !important;
     box-shadow: none !important;
     padding: 0 !important;
-    margin-bottom: 0.4rem !important;
+    margin-bottom: 0 !important;
 }
 
 div[data-testid="stHorizontalBlock"] {
-    gap: 1rem !important;
+    gap: 1.3rem !important;
+    align-items: stretch !important;
+}
+
+div[data-testid="stHorizontalBlock"] > div,
+div[data-testid="column"] {
+    min-width: 0 !important;
+}
+
+/* KPI 묶음 / 차트 묶음 간격 보강 */
+div[data-testid="stHorizontalBlock"]:has(.kpi-card) {
+    gap: 1.15rem !important;
+    margin-bottom: 1.15rem !important;
+}
+
+div[data-testid="stElementContainer"]:has(> .sec-title) {
+    margin-top: 0.55rem !important;
+    margin-bottom: 0.2rem !important;
+}
+
+div[data-testid="stElementContainer"]:has(> div[data-testid="stPlotlyChart"]),
+div[data-testid="stElementContainer"]:has(> .ag-theme-streamlit),
+div[data-testid="stElementContainer"]:has(> div[data-testid="stExpander"]) {
+    background: #ffffff;
+    border: 1px solid #e5e9f2;
+    border-radius: 18px;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+    padding: 14px 16px 12px 16px;
+    margin-bottom: 1.35rem !important;
+    overflow: visible !important;
+}
+
+div[data-testid="stElementContainer"]:has(> div[data-testid="stExpander"]) {
+    padding-top: 4px;
+    padding-bottom: 4px;
 }
 
 h1, h2, h3 {
@@ -181,7 +218,7 @@ h1, h2, h3 {
     display: inline-flex;
     align-items: center;
     gap: 10px;
-    margin: 0.3rem 0 1rem 0;
+    margin: 0.3rem 0 1.15rem 0;
 }
 
 .sub-title {
@@ -193,16 +230,16 @@ h1, h2, h3 {
     font-size: 18px;
     font-weight: 750;
     color: #18212f;
-    margin: 0.25rem 0 0.7rem 0;
-    padding: 0 0.2rem;
+    margin: 0.95rem 0 0.95rem 0;
+    padding: 0 0.15rem;
 }
 
 .kpi-card {
     background: #ffffff;
     border: 1px solid #e5e9f2;
     border-radius: 16px;
-    padding: 18px 16px;
-    min-height: 116px;
+    padding: 20px 18px;
+    min-height: 128px;
     height: 100%;
     display: flex;
     flex-direction: column;
@@ -215,7 +252,7 @@ h1, h2, h3 {
     font-size: 13px;
     font-weight: 700;
     color: #6b7280;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
 }
 
 .kpi-value {
@@ -226,10 +263,10 @@ h1, h2, h3 {
 }
 
 .kpi-subwrap {
-    margin-top: 8px;
+    margin-top: 10px;
     font-size: 12px;
     color: #8b95a7;
-    line-height: 1.45;
+    line-height: 1.5;
 }
 
 .kpi-sublabel { color: #94a3b8; }
@@ -246,24 +283,33 @@ h1, h2, h3 {
 .rank-tip-name { flex:1 1 auto; min-width:0; font-size:12px; color:#374151; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .rank-tip-val { flex:0 0 auto; font-size:12px; font-weight:700; color:#111827; }
 
-/* 차트 / 표 / expander는 wrapper 대신 요소 자체를 카드화 */
+/* 내부 컴포넌트는 카드 박스 제거 */
 div[data-testid="stPlotlyChart"],
 .ag-theme-streamlit,
 div[data-testid="stExpander"],
 div[data-testid="stAlert"] {
-    background: #ffffff;
-    border: 1px solid #e5e9f2;
-    border-radius: 16px;
-    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
 }
 
 div[data-testid="stPlotlyChart"] {
-    padding: 10px 10px 4px 10px;
+    margin: 0 !important;
+    overflow: visible !important;
 }
 
-div[data-testid="stExpander"] {
-    padding: 2px 10px;
-    margin-bottom: 0.75rem;
+div[data-testid="stPlotlyChart"] > div,
+div[data-testid="stPlotlyChart"] .js-plotly-plot,
+div[data-testid="stPlotlyChart"] .plot-container,
+div[data-testid="stPlotlyChart"] .svg-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow: visible !important;
+}
+
+.js-plotly-plot .plotly .modebar {
+    top: -6px !important;
 }
 
 .ag-theme-streamlit {
@@ -277,8 +323,18 @@ div[data-testid="stExpander"] {
     border-bottom: 1px solid #e5e7eb;
 }
 
+div[data-testid="stExpander"] details {
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+div[data-testid="stExpander"] summary {
+    padding: 0.2rem 0.25rem !important;
+}
+
 hr {
-    margin: 1.4rem 0 !important;
+    margin: 2rem 0 !important;
     border-color: #e5e7eb !important;
 }
 
@@ -4755,11 +4811,9 @@ def render_pre_launch_analysis():
         from sklearn.pipeline import Pipeline
         from sklearn.preprocessing import StandardScaler
         from sklearn.linear_model import Ridge
-    except Exception as _e:
-        raise ModuleNotFoundError(
-            "scikit-learn is required for the multi-model predictor. "
-            "Add 'scikit-learn' to requirements.txt and redeploy."
-        ) from _e
+    except Exception:
+        st.warning("예측 모델 모듈이 현재 배포 환경에 없어 점수 예측 기능은 잠시 비활성화되어 있습니다.")
+        return
 
     WEEK_ORDER = ["W-6", "W-5", "W-4", "W-3", "W-2", "W-1"]
 
