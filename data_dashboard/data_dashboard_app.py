@@ -32,14 +32,13 @@ st.set_page_config(
 )
 
 
-
 # =====================================================
 #endregion
 #region [ 3. frontgate 연동 인증 / 권한 게이트 ]
 import json
 import hmac
 import base64
-from datetime import datetime, timedelta, timezone
+from datetime import datetime as dt_datetime, timedelta, timezone
 
 try:
     from pymongo import MongoClient
@@ -76,8 +75,6 @@ def get_auth_cfg() -> Dict[str, Any]:
     cfg.setdefault("session_ttl_hours", 12)
     cfg.setdefault("session_idle_minutes", 120)
     cfg.setdefault("remember_me_days", 3)
-    cfg.setdefault("token", "")
-    cfg.setdefault("pepper", "")
     cfg.setdefault("signing_secret", "")
     cfg.setdefault("local_storage_key", "drama_portal_auth")
     cfg.setdefault("cookie_name", "drama_portal_session")
@@ -110,15 +107,15 @@ def _rerun():
 
 
 def utcnow():
-    return datetime.now(UTC)
+    return dt_datetime.now(UTC)
 
 
-def ensure_utc(dt):
-    if dt is None:
+def ensure_utc(v):
+    if v is None:
         return None
-    if getattr(dt, "tzinfo", None) is None:
-        return dt.replace(tzinfo=UTC)
-    return dt.astimezone(UTC)
+    if getattr(v, "tzinfo", None) is None:
+        return v.replace(tzinfo=UTC)
+    return v.astimezone(UTC)
 
 
 def _b64url(data: bytes) -> str:
@@ -130,8 +127,10 @@ def _b64url_decode(data: str) -> bytes:
     return base64.urlsafe_b64decode((data + padding).encode("utf-8"))
 
 
-def token_hash(raw: str) -> str:
-    return hashlib.sha256(str(raw or "").encode("utf-8")).hexdigest()
+def sign_payload(payload: Dict[str, Any]) -> str:
+    body = _b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    sig = hmac.new(SIGNING_SECRET.encode("utf-8"), body.encode("utf-8"), hashlib.sha256).digest()
+    return f"{body}.{_b64url(sig)}"
 
 
 def verify_signed_payload(token: str) -> Optional[Dict[str, Any]]:
@@ -149,6 +148,10 @@ def verify_signed_payload(token: str) -> Optional[Dict[str, Any]]:
         return payload
     except Exception:
         return None
+
+
+def token_hash(raw: str) -> str:
+    return hashlib.sha256(str(raw or "").encode("utf-8")).hexdigest()
 
 
 def get_cookie_manager():
@@ -176,7 +179,7 @@ def set_cookie(name: str, value: str, days: int = 3):
     if cm is None:
         return
     try:
-        expires_at = datetime.now(KST) + timedelta(days=days)
+        expires_at = dt_datetime.now(KST) + timedelta(days=days)
         cm.set(name, value, expires_at=expires_at, secure=True, same_site="Lax")
     except Exception:
         pass
@@ -277,7 +280,7 @@ def validate_session(raw_token: str) -> Optional[Dict[str, Any]]:
         sessions.update_one({"_id": doc["_id"]}, {"$set": {"is_active": False, "revoked_at": now}})
         return None
 
-    user = get_user_by_id(str(doc.get("user_id")))
+    user = get_user_by_id(str(doc.get("user_id") or ""))
     if not user or not bool(user.get("active", True)):
         sessions.update_one({"_id": doc["_id"]}, {"$set": {"is_active": False, "revoked_at": now}})
         return None
@@ -296,8 +299,7 @@ def validate_session(raw_token: str) -> Optional[Dict[str, Any]]:
 def user_can_access_app(user: Optional[Dict[str, Any]], app_key: str = APP_KEY) -> bool:
     if not user:
         return False
-    role = str(user.get("role") or "")
-    if role == str(AUTH.get("admin_role_name", "admin")):
+    if str(user.get("role") or "") == str(AUTH.get("admin_role_name", "admin")):
         return True
     return app_key in list(user.get("allowed_apps") or [])
 
@@ -314,20 +316,33 @@ def clear_auth_query_param():
         pass
 
 
-def consume_handoff_auth() -> Optional[Dict[str, Any]]:
-    auth_token = str(st.query_params.get("auth", "") or "")
-    if not auth_token:
-        return None
+def issue_dashboard_app_session(user: Dict[str, Any], remember: bool = True) -> str:
+    now = utcnow()
+    if remember:
+        exp = now + timedelta(days=int(AUTH.get("remember_me_days", 3)))
+    else:
+        exp = now + timedelta(hours=int(AUTH.get("session_ttl_hours", 12)))
+    payload = {
+        "sub": str(user.get("id") or ""),
+        "name": str(user.get("name") or user.get("id") or ""),
+        "role": str(user.get("role") or AUTH["default_role"]),
+        "perms": list(user.get("permissions") or []),
+        "apps": list(user.get("allowed_apps") or []),
+        "app": APP_KEY,
+        "kind": "dashboard_session",
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+    }
+    return sign_payload(payload)
 
-    payload = verify_signed_payload(auth_token)
-    clear_auth_query_param()
 
+def restore_user_from_dashboard_app_session(token: str) -> Optional[Dict[str, Any]]:
+    payload = verify_signed_payload(token)
     if not payload:
-        st.session_state["dashboard_auth_error"] = "frontgate에서 전달된 인증 토큰이 유효하지 않습니다."
         return None
-
+    if str(payload.get("kind") or "") != "dashboard_session":
+        return None
     if str(payload.get("app") or "") != APP_KEY:
-        st.session_state["dashboard_auth_error"] = "이 앱용으로 발급된 토큰이 아닙니다."
         return None
 
     user = {
@@ -339,8 +354,54 @@ def consume_handoff_auth() -> Optional[Dict[str, Any]]:
         "session_token": "",
     }
 
+    live_user = get_user_by_id(str(user.get("id") or ""))
+    if live_user and bool(live_user.get("active", True)):
+        user = {
+            "id": str(live_user.get("id")),
+            "name": str(live_user.get("name") or live_user.get("id")),
+            "role": str(live_user.get("role") or AUTH["default_role"]),
+            "allowed_apps": list(live_user.get("allowed_apps") or []),
+            "permissions": list(live_user.get("permissions") or []),
+            "session_token": "",
+        }
+
     if not user_can_access_app(user, APP_KEY):
-        st.session_state["dashboard_auth_error"] = "이 계정은 data_dashboard 접근 권한이 없습니다."
+        return None
+    return user
+
+
+def persist_dashboard_session(user: Dict[str, Any], remember: bool = True):
+    token = issue_dashboard_app_session(user, remember=remember)
+    days = int(AUTH.get("remember_me_days", 3)) if remember else 1
+    set_cookie(COOKIE_NAME, token, days=days)
+    inject_browser_session_set(token, days=days)
+    st.session_state["_dashboard_session_synced"] = token
+
+
+def consume_handoff_auth() -> Optional[Dict[str, Any]]:
+    auth_token = str(st.query_params.get("auth", "") or "")
+    if not auth_token:
+        return None
+
+    payload = verify_signed_payload(auth_token)
+    clear_auth_query_param()
+    if not payload:
+        st.session_state["dashboard_auth_error"] = "전달된 로그인 정보가 유효하지 않습니다. 드라마 마케팅 대시보드에서 다시 접속해 주세요."
+        return None
+    if str(payload.get("app") or "") != APP_KEY:
+        st.session_state["dashboard_auth_error"] = "이 앱용 로그인 정보가 아닙니다."
+        return None
+
+    user = {
+        "id": str(payload.get("sub") or ""),
+        "name": str(payload.get("name") or payload.get("sub") or ""),
+        "role": str(payload.get("role") or AUTH["default_role"]),
+        "allowed_apps": list(payload.get("apps") or []),
+        "permissions": list(payload.get("perms") or []),
+        "session_token": "",
+    }
+    if not user_can_access_app(user, APP_KEY):
+        st.session_state["dashboard_auth_error"] = "이 계정은 드라마 성과 대시보드 접근 권한이 없습니다."
         return None
 
     st.session_state["current_user"] = user
@@ -349,11 +410,9 @@ def consume_handoff_auth() -> Optional[Dict[str, Any]]:
     validated = validate_session(raw_session) if raw_session else None
     if validated and user_can_access_app(validated, APP_KEY):
         st.session_state["current_user"] = validated
-    elif raw_session:
-        set_cookie(COOKIE_NAME, raw_session, days=int(AUTH.get("remember_me_days", 3)))
-        inject_browser_session_set(raw_session, days=int(AUTH.get("remember_me_days", 3)))
-        st.session_state["current_user"]["session_token"] = raw_session
-
+        persist_dashboard_session(validated, remember=True)
+    else:
+        persist_dashboard_session(user, remember=True)
     return st.session_state.get("current_user")
 
 
@@ -363,40 +422,63 @@ def restore_current_user() -> Optional[Dict[str, Any]]:
 
     user = consume_handoff_auth()
     if user:
+        st.session_state["_restore_bootstrap_count"] = 0
         return user
 
-    raw_session = get_cookie(COOKIE_NAME)
-    if raw_session:
-        validated = validate_session(raw_session)
+    bootstrap_count = int(st.session_state.get("_restore_bootstrap_count", 0) or 0)
+
+    cookie_token = get_cookie(COOKIE_NAME)
+    if cookie_token:
+        validated = validate_session(cookie_token)
         if validated and user_can_access_app(validated, APP_KEY):
             st.session_state["current_user"] = validated
+            st.session_state["_restore_bootstrap_count"] = 0
+            persist_dashboard_session(validated, remember=True)
             return validated
 
-    ls_token = get_local_storage_token(seq="restore")
-    if ls_token and ls_token not in ("null", "undefined"):
-        validated = validate_session(ls_token)
+        restored = restore_user_from_dashboard_app_session(cookie_token)
+        if restored:
+            st.session_state["current_user"] = restored
+            st.session_state["_restore_bootstrap_count"] = 0
+            persist_dashboard_session(restored, remember=True)
+            return restored
+
+    local_token = get_local_storage_token(seq=f"restore_{bootstrap_count}")
+    if local_token:
+        validated = validate_session(local_token)
         if validated and user_can_access_app(validated, APP_KEY):
-            set_cookie(COOKIE_NAME, ls_token, days=int(AUTH.get("remember_me_days", 3)))
-            inject_browser_session_set(ls_token, days=int(AUTH.get("remember_me_days", 3)))
             st.session_state["current_user"] = validated
+            st.session_state["_restore_bootstrap_count"] = 0
+            persist_dashboard_session(validated, remember=True)
             return validated
+
+        restored = restore_user_from_dashboard_app_session(local_token)
+        if restored:
+            st.session_state["current_user"] = restored
+            st.session_state["_restore_bootstrap_count"] = 0
+            persist_dashboard_session(restored, remember=True)
+            return restored
+
+    if bootstrap_count < 2:
+        st.session_state["_restore_bootstrap_count"] = bootstrap_count + 1
+        get_cookie_manager()
+        get_local_storage_token(seq=f"bootstrap_{bootstrap_count}")
+        _rerun()
 
     return None
 
 
 def render_access_denied():
-    st.markdown("## 🔐 드라마 데이터 대시보드")
     err = str(st.session_state.get("dashboard_auth_error") or "").strip()
+    st.markdown("## 🔐 드라마 데이터 대시보드")
     if err:
         st.error(err)
     else:
-        st.warning("드라마 마케팅 대시보드를 통해 로그인한 뒤 다시 접근해 주세요.")
+        st.warning("드라마 마케팅 대시보드에서 로그인한 뒤 다시 접근해 주세요.")
 
     fg_url = frontgate_url()
     if fg_url:
         st.markdown(f"[드라마 마케팅 대시보드로 이동]({fg_url})")
-    else:
-        st.info("apps.frontgate URL이 secrets에 없으면 바로가기 링크를 표시할 수 없습니다.")
     st.stop()
 
 
@@ -404,16 +486,13 @@ def render_sidebar_user_status(user: Dict[str, Any]):
     name = str(user.get("name") or user.get("id") or "-")
     user_id = str(user.get("id") or "-")
     role = str(user.get("role") or "")
-    role_html = f"<div class='sidebar-user-meta'>권한: {role}</div>" if role else ""
-    st.sidebar.markdown(
+    st.markdown(
         f"""
-        <div class="sidebar-user-status-wrap">
-            <div class="sidebar-user-status-box">
-                <div class="sidebar-user-label">로그인 상태</div>
-                <div class="sidebar-user-name">{name}</div>
-                <div class="sidebar-user-meta">ID: {user_id}</div>
-                {role_html}
-            </div>
+        <div style="margin-top:18px; padding:10px 16px 0 16px; border-top:1px solid #eceff3; color:#7b8190; font-size:11px; line-height:1.5;">
+            <div style="font-size:10px; font-weight:700; letter-spacing:-0.01em; color:#9aa1af; margin-bottom:4px;">접속계정정보</div>
+            <div style="font-size:11px; font-weight:600; color:#6b7280;">{name}</div>
+            <div style="font-size:10px; color:#9aa1af;">ID: {user_id}</div>
+            {f'<div style="font-size:10px; color:#9aa1af;">권한: {role}</div>' if role else ''}
         </div>
         """,
         unsafe_allow_html=True,
@@ -541,42 +620,6 @@ section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
 }
 
 section[data-testid="stSidebar"] button svg { display: none !important; }
-
-
-.sidebar-user-status-wrap {
-    position: sticky;
-    bottom: 0;
-    padding-top: 24px;
-    margin-top: 28px;
-    background: linear-gradient(to top, white 72%, rgba(255,255,255,0));
-    z-index: 20;
-}
-
-.sidebar-user-status-box {
-    border-top: 1px solid rgba(0,0,0,0.08);
-    padding: 10px 2px 2px 2px;
-}
-
-.sidebar-user-label {
-    font-size: 11px;
-    color: #7a7a7a;
-    margin-bottom: 4px;
-    letter-spacing: -0.1px;
-}
-
-.sidebar-user-name {
-    font-size: 12px;
-    font-weight: 600;
-    color: #222222;
-    line-height: 1.35;
-    margin-bottom: 2px;
-}
-
-.sidebar-user-meta {
-    font-size: 10.5px;
-    color: #7a7a7a;
-    line-height: 1.35;
-}
 
 /* 사이드바 텍스트 여백 */
 section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2, 
@@ -788,30 +831,21 @@ pio.templates.default = 'dashboard_theme'
 #region [ 4. 데이터 로드 / 전처리 ]
 def load_data() -> pd.DataFrame:
     """
-    통합 secrets 구조에서 Google 서비스 계정과 data_dashboard 데이터 소스를 읽어옵니다.
+    통합 secrets 구조를 우선 사용하고, 기존 단독 keys도 하위호환으로 허용합니다.
     우선순위:
-    1) google.service_account + data_dashboard.sheet_id/sheet_name
-    2) 기존 호환용 gcp_service_account + SHEET_ID/SHEET_NAME
+    - google.service_account / data_dashboard.sheet_id / data_dashboard.sheet_name
+    - gcp_service_account / SHEET_ID / SHEET_NAME
     """
-    
-    # --- 1. Google Sheets 인증 ---
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    
-    try:
-        creds_info = sget("google", "service_account", default=None) or sget("gcp_service_account", default=None)
-        if not creds_info:
-            raise KeyError("google.service_account")
 
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+
+    try:
+        creds_info = sget("google", "service_account", default=None) or st.secrets["gcp_service_account"]
         creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
         client = gspread.authorize(creds)
 
-        # --- 2. 데이터 로드 ---
-        sheet_id = sget("data_dashboard", "sheet_id", default=None) or sget("SHEET_ID", default=None)
-        worksheet_name = sget("data_dashboard", "sheet_name", default=None) or sget("SHEET_NAME", default=None)
-        if not sheet_id:
-            raise KeyError("data_dashboard.sheet_id")
-        if not worksheet_name:
-            raise KeyError("data_dashboard.sheet_name")
+        sheet_id = sget("data_dashboard", "sheet_id", default=None) or st.secrets["SHEET_ID"]
+        worksheet_name = sget("data_dashboard", "sheet_name", default=None) or st.secrets["SHEET_NAME"]
         
         spreadsheet = client.open_by_key(sheet_id)
         worksheet = spreadsheet.worksheet(worksheet_name)
@@ -820,10 +854,10 @@ def load_data() -> pd.DataFrame:
         df = pd.DataFrame(data)
 
     except gspread.exceptions.WorksheetNotFound:
-        st.error(f"통합 secrets의 sheet_name 값 ('{worksheet_name}')에 해당하는 워크시트를 찾을 수 없습니다.")
+        st.error(f"Streamlit Secrets의 SHEET_NAME 값 ('{worksheet_name}')에 해당하는 워크시트를 찾을 수 없습니다.")
         return pd.DataFrame()
     except KeyError as e:
-        st.error(f"통합 secrets에 필요한 키({e})가 없습니다. auth/mongo/google/data_dashboard 구조를 확인하세요.")
+        st.error(f"Streamlit Secrets에 필요한 키({e})가 없습니다. TOML 설정을 확인하세요.")
         return pd.DataFrame()
     except Exception as e:
         st.error(f"Google Sheets 데이터 로드 중 오류 발생: {e}")
@@ -5384,5 +5418,6 @@ elif st.session_state["page"] == "성장스코어":
 else:
     render_overview() # 기본값으로 Overview 렌더링
 
-render_sidebar_user_status(CURRENT_USER)
+with st.sidebar:
+    render_sidebar_user_status(CURRENT_USER)
     #endregion
