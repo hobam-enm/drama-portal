@@ -31,14 +31,267 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CSS 선주입: 인증 컴포넌트가 만들어지기 전에 핵심 레이아웃 스타일을 먼저 태운다.
+# CSS 선주입: wrapper 감지형 CSS 대신, KPI/차트/표/사이드바를 직접 스타일링하는 안정형 CSS를 사용한다.
 st.markdown("""
 <style>
-header[data-testid="stHeader"], div[data-testid="stDecoration"] {display:none !important;}
-[data-testid="stAppViewContainer"] {background-color:#f9fafb !important; background-image:none !important;}
-.block-container {padding-top:2rem; padding-bottom:5rem; max-width:1600px !important;}
-section[data-testid="stSidebar"] {background-color:#ffffff !important; border-right:1px solid #e0e0e0; box-shadow:4px 0 15px rgba(0,0,0,0.1); min-width:280px !important; max-width:280px !important; padding-top:1rem; padding-left:0 !important; padding-right:0 !important;}
-section[data-testid="stSidebar"] .block-container, section[data-testid="stSidebar"] [data-testid="stSidebarContent"] {padding-left:0 !important; padding-right:0 !important; width:100% !important;}
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+
+header[data-testid="stHeader"],
+div[data-testid="stDecoration"] {
+    display: none !important;
+}
+
+html, body, [class*="css"] {
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif !important;
+}
+
+[data-testid="stAppViewContainer"] {
+    background: #f7f8fc !important;
+}
+
+.block-container {
+    max-width: 1600px !important;
+    padding-top: 2rem !important;
+    padding-bottom: 4rem !important;
+}
+
+section[data-testid="stSidebar"] {
+    background: #ffffff !important;
+    border-right: 1px solid #e8ebf2;
+    min-width: 280px !important;
+    max-width: 280px !important;
+    padding-top: 0.8rem;
+}
+
+section[data-testid="stSidebar"] .block-container,
+section[data-testid="stSidebar"] [data-testid="stSidebarContent"] {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+}
+
+section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"],
+section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] > div[data-testid="stElementContainer"] {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {
+    gap: 0 !important;
+}
+
+section[data-testid="stSidebar"] .stButton,
+section[data-testid="stSidebar"] .stButton > button {
+    width: 100% !important;
+    margin: 0 !important;
+}
+
+section[data-testid="stSidebar"] .stButton > button {
+    min-height: 46px;
+    padding: 0.72rem 1rem !important;
+    border-radius: 0 !important;
+    border: none !important;
+    border-bottom: 1px solid #eef1f6 !important;
+    background: transparent !important;
+    color: #2b3445 !important;
+    font-weight: 650 !important;
+    justify-content: flex-start !important;
+    box-shadow: none !important;
+}
+
+section[data-testid="stSidebar"] .stButton > button:hover {
+    background: #f4f7fb !important;
+}
+
+section[data-testid="stSidebar"] [data-testid="baseButton-primary"] > button,
+section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+    background: #0b61ff !important;
+    color: #ffffff !important;
+    border-bottom-color: #0b61ff !important;
+}
+
+section[data-testid="stSidebar"] button svg {
+    display: none !important;
+}
+
+.page-title-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    margin: 0.35rem 0 1rem 0;
+}
+
+.page-title-main {
+    font-size: 24px;
+    font-weight: 800;
+    letter-spacing: -0.4px;
+    background: linear-gradient(90deg, #6A5ACD, #FF7A8A);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-align: center;
+}
+
+section[data-testid="stSidebar"] div[data-testid="stSelectbox"] {
+    padding: 0 12px 8px 12px !important;
+}
+
+section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+    background: #f4f7fb !important;
+    border: 1px solid #e4e9f1 !important;
+    border-radius: 10px !important;
+}
+
+section[data-testid="stSidebar"] div[data-baseweb="select"] span {
+    text-align: center !important;
+    font-weight: 700 !important;
+    color: #0f172a !important;
+}
+
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p.sidebar-contact {
+    padding: 0 14px;
+}
+
+/* 메인 래퍼는 투명하게 두고, 실제 컴포넌트를 직접 스타일링 */
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin-bottom: 0.4rem !important;
+}
+
+div[data-testid="stHorizontalBlock"] {
+    gap: 1rem !important;
+}
+
+h1, h2, h3 {
+    color: #111827;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+
+.page-title,
+.sub-title {
+    font-size: 28px;
+    font-weight: 800;
+    color: #111827;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0.3rem 0 1rem 0;
+}
+
+.sub-title {
+    font-size: 24px;
+    margin-top: 0.2rem;
+}
+
+.sec-title {
+    font-size: 18px;
+    font-weight: 750;
+    color: #18212f;
+    margin: 0.25rem 0 0.7rem 0;
+    padding: 0 0.2rem;
+}
+
+.kpi-card {
+    background: #ffffff;
+    border: 1px solid #e5e9f2;
+    border-radius: 16px;
+    padding: 18px 16px;
+    min-height: 116px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    text-align: center;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+}
+
+.kpi-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #6b7280;
+    margin-bottom: 8px;
+}
+
+.kpi-value {
+    font-size: 26px;
+    font-weight: 800;
+    color: #111827;
+    line-height: 1.2;
+}
+
+.kpi-subwrap {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #8b95a7;
+    line-height: 1.45;
+}
+
+.kpi-sublabel { color: #94a3b8; }
+.kpi-substrong { color: #1f2937; font-weight: 700; }
+.kpi-subpct { font-weight: 700; }
+
+.rank-help-wrap { position: relative; display: inline-flex; align-items: center; margin-left: 4px; }
+.rank-help-icon { display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; border-radius:999px; background:#eef2ff; color:#4f46e5; font-size:11px; font-weight:800; cursor:help; line-height:1; border:1px solid #c7d2fe; }
+.rank-help-bubble { display:none; position:absolute; top:20px; left:0; min-width:260px; max-width:340px; background:#ffffff; border:1px solid #e5e7eb; box-shadow:0 10px 24px rgba(0,0,0,0.12); border-radius:10px; padding:10px; z-index:10040; text-align:left; }
+.rank-help-wrap:hover .rank-help-bubble { display:block; }
+.rank-tip-title { font-size:12px; font-weight:700; color:#374151; margin-bottom:6px; }
+.rank-tip-row { display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:6px; }
+.rank-tip-rank { width:36px; flex:0 0 36px; font-size:12px; font-weight:700; color:#111827; }
+.rank-tip-name { flex:1 1 auto; min-width:0; font-size:12px; color:#374151; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.rank-tip-val { flex:0 0 auto; font-size:12px; font-weight:700; color:#111827; }
+
+/* 차트 / 표 / expander는 wrapper 대신 요소 자체를 카드화 */
+div[data-testid="stPlotlyChart"],
+.ag-theme-streamlit,
+div[data-testid="stExpander"],
+div[data-testid="stAlert"] {
+    background: #ffffff;
+    border: 1px solid #e5e9f2;
+    border-radius: 16px;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+}
+
+div[data-testid="stPlotlyChart"] {
+    padding: 10px 10px 4px 10px;
+}
+
+div[data-testid="stExpander"] {
+    padding: 2px 10px;
+    margin-bottom: 0.75rem;
+}
+
+.ag-theme-streamlit {
+    overflow: hidden;
+}
+
+.ag-theme-streamlit .ag-header {
+    background: #f8fafc;
+    font-weight: 700;
+    color: #374151;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+hr {
+    margin: 1.4rem 0 !important;
+    border-color: #e5e7eb !important;
+}
+
+.gd-guideline {
+    font-size: 14px;
+    color: #475569;
+    line-height: 1.7;
+}
+
+.nav-active, .nav-inactive {
+    margin: 0 !important;
+    padding: 0 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -422,273 +675,8 @@ def require_app_auth() -> Dict[str, Any]:
 
 # =====================================================
 
-st.markdown("""
-<style>
-            
- /* -------------------------------------------------------------------
-   0. [추가] 스트림릿 기본 헤더(Toolbar) 숨기기
-   ------------------------------------------------------------------- */
-header[data-testid="stHeader"] {
-    display: none !important; /* 상단 헤더 영역 전체 숨김 */
-}
-div[data-testid="stDecoration"] {
-    display: none !important; /* 상단 컬러 데코레이션 바 숨김 */
-}
-                       
-/* -------------------------------------------------------------------
-   1. 앱 전체 기본 설정
-   ------------------------------------------------------------------- */
-@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+# 추가 대형 CSS 블록 제거: 상단 안정형 CSS로 대체
 
-html, body, [class*="css"] {
-    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif !important;
-}
-
-/* 페이지 배경: 흰색 */
-[data-testid="stAppViewContainer"] {
-    background-color: #f9fafb !important;
-    background-image: none !important;
-}
-
-/* 상단 여백 */
-.block-container {
-    padding-top: 2rem;
-    padding-bottom: 5rem;
-    max-width: 1600px !important;
-}
-
-
-/* -------------------------------------------------------------------
-   2. 사이드바 스타일 
-   ------------------------------------------------------------------- */
-section[data-testid="stSidebar"] {
-    background-color: #ffffff !important; 
-    border-right: 1px solid #e0e0e0;
-    box-shadow: 4px 0 15px rgba(0, 0, 0, 0.1); /* 오른쪽(10px)으로 퍼지는 연한 그림자 */
-    min-width: 280px !important;
-    max-width: 280px !important;
-    padding-top: 1rem;
-    padding-left: 0 !important;
-    padding-right: 0 !important;
-}
-
-/* 내부 여백 정리 */
-section[data-testid="stSidebar"] .block-container,
-section[data-testid="stSidebar"] [data-testid="stSidebarContent"] {
-    padding-left: 0 !important;
-    padding-right: 0 !important;
-    width: 100% !important;
-}
-
-/* 내부 카드 효과 제거 */
-section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"] {
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    padding: 0 !important;
-    transform: none !important;
-}
-
-/* [핵심 1] 버튼 컨테이너 틈 제거 */
-section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {
-    gap: 0rem !important;
-}
-
-section[data-testid="stSidebar"] .stButton {
-    margin: 0 !important;
-    padding: 0 !important;
-    width: 100% !important;
-}
-
-/* [핵심 2] 버튼 스타일: 패딩을 8px로 확 줄여서 '다닥다닥' 구현 */
-section[data-testid="stSidebar"] .stButton > button {
-    width: 100%;
-    box-sizing: border-box;
-    text-align: left;
-    
-    margin: 0 !important;
-    
-    border-radius: 0px !important;
-    border: none !important;
-    border-bottom: 1px solid #e9ecef !important; /* 연한 구분선 */
-    
-    background: transparent !important;
-    color: #333333 !important;
-    font-weight: 600;
-    
-    box-shadow: none !important;
-    transition: background-color 0.15s;
-}
-
-/* 버튼 호버 */
-section[data-testid="stSidebar"] .stButton > button:hover {
-    background: #e5e7eb !important;
-    color: #000000 !important;
-}
-
-/* 선택된 버튼 (Active): 파란 배경 + 흰색 글씨 */
-section[data-testid="stSidebar"] [data-testid="baseButton-primary"] > button,
-section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
-    background: #0b61ff !important;    
-    color: #ffffff !important;         
-    border-bottom: 1px solid #0b61ff !important;
-    font-weight: 700;
-}
-
-section[data-testid="stSidebar"] button svg { display: none !important; }
-
-/* 사이드바 텍스트 여백 */
-section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2, 
-section[data-testid="stSidebar"] h3, section[data-testid="stSidebar"] .stMarkdown, 
-section[data-testid="stSidebar"] .stSelectbox, section[data-testid="stSidebar"] .stMultiSelect {
-    padding-left: 0px !important;
-    padding-right: 0px !important;
-}
-
-/* [핵심 3] 사이드바 제목: 꽉 차고 크게 */
-.page-title-wrap { 
-    display: flex; 
-    align-items: center; 
-    justify-content: center; 
-    gap: 8px; 
-    margin: 10px 0 20px 0; 
-    padding: 0 0px;
-    width: 100%;
-}
-.page-title-emoji { font-size: 26px; line-height: 1; }
-.page-title-main {
-    font-size: 24px;
-    font-weight: 800; 
-    letter-spacing: -0.5px;
-    line-height: 1.2;
-    background: linear-gradient(90deg, #6A5ACD, #FF7A8A);
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    text-align: center;
-    width: 100%;
-    white-space: nowrap; /* 줄바꿈 방지 */
-}
-
-
-/* -------------------------------------------------------------------
-   3. 메인 컨텐츠 카드 
-   ------------------------------------------------------------------- */
-div[data-testid="stVerticalBlockBorderWrapper"] {
-    background-color: #ffffff;
-    border: 1px solid #e5e7eb;
-    border-radius: 12px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.03);
-    
-    padding: 1.5rem;
-    margin-bottom: 1.5rem;
-    
-    /* 들썩임 방지 */
-    transition: transform 0.25s ease, box-shadow 0.25s ease;
-    will-change: transform, box-shadow;
-    backface-visibility: hidden; 
-}
-
-/* 마우스 올렸을 때 플로팅 */
-div[data-testid="stVerticalBlockBorderWrapper"]:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 12px 24px rgba(0,0,0,0.08);
-    border-color: #d1d5db;
-    z-index: 5;
-}
-
-/* 투명 예외 처리 */
-div[data-testid="stVerticalBlockBorderWrapper"]:has(.kpi-card),
-div[data-testid="stVerticalBlockBorderWrapper"]:has(.page-title),
-div[data-testid="stVerticalBlockBorderWrapper"]:has(h1),
-div[data-testid="stVerticalBlockBorderWrapper"]:has(h2),
-div[data-testid="stVerticalBlockBorderWrapper"]:has(h3),
-div[data-testid="stVerticalBlockBorderWrapper"]:has(div[data-testid="stSelectbox"]),
-div[data-testid="stVerticalBlockBorderWrapper"]:has(div[data-testid="stMultiSelect"]),
-div[data-testid="stVerticalBlockBorderWrapper"]:has(div[data-testid="stSlider"]),
-div[data-testid="stVerticalBlockBorderWrapper"]:has(div[data-testid="stRadio"]),
-div[data-testid="stVerticalBlockBorderWrapper"]:has(.filter-group),
-div[data-testid="stVerticalBlockBorderWrapper"]:has(.mode-switch) {
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    padding: 0 !important;
-    margin-bottom: 0.5rem !important;
-    transform: none !important; 
-}
-
-
-/* -------------------------------------------------------------------
-   4. 기타 컴포넌트
-   ------------------------------------------------------------------- */
-h1, h2, h3 { color: #111827; font-weight: 800; letter-spacing: -0.02em; }
-
-.page-title {
-    font-size: 28px;
-    font-weight: 800;
-    display: inline-flex; align-items: center; gap: 10px;
-    margin: 10px 0 20px 0;
-}
-
-/* KPI 카드 (자체 플로팅) */
-.kpi-card {
-    background: #ffffff;
-    border: 1px solid #e5e7eb;
-    border-radius: 12px;
-    padding: 20px 15px;
-    text-align: center;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.03); 
-    height: 100%;
-    display: flex; flex-direction: column; justify-content: center;
-    position: relative;
-    overflow: visible;
-    z-index: 1;
-    
-    transition: transform 0.25s ease, box-shadow 0.25s ease;
-    will-change: transform, box-shadow;
-}
-.kpi-card:hover,
-.kpi-card:has(.rank-help-wrap:hover) { 
-    transform: translateY(-4px); 
-    box-shadow: 0 12px 24px rgba(0,0,0,0.08);
-    border-color: #d1d5db;
-    z-index: 10020;
-}
-
-/* 툴팁이 주변 카드/컬럼에 잘리지 않도록 상위 컨테이너도 열어둠 */
-div[data-testid="column"],
-div[data-testid="stVerticalBlock"],
-div[data-testid="stVerticalBlockBorderWrapper"] {
-    overflow: visible !important;
-}
-div[data-testid="stVerticalBlockBorderWrapper"]:has(.kpi-card),
-div[data-testid="column"]:has(.kpi-card) {
-    position: relative;
-}
-div[data-testid="stVerticalBlockBorderWrapper"]:has(.rank-help-wrap:hover),
-div[data-testid="column"]:has(.rank-help-wrap:hover) {
-    z-index: 10010 !important;
-}
-
-.kpi-title { font-size: 14px; font-weight: 600; color: #6b7280; margin-bottom: 8px; }
-.kpi-value { font-size: 26px; font-weight: 800; color: #111827; line-height: 1.2; }
-.kpi-subwrap { margin-top: 8px; font-size: 12px; color: #9ca3af; }
-
-.ag-theme-streamlit .ag-header { 
-    background-color: #f9fafb; font-weight: 700; color: #374151; 
-    border-bottom: 1px solid #e5e7eb;
-}
-
-.rank-help-wrap { position: relative; display: inline-flex; align-items: center; margin-left: 4px; z-index: 10030; }
-.rank-help-icon { display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; border-radius:999px; background:#eef2ff; color:#4f46e5; font-size:11px; font-weight:800; cursor:help; line-height:1; border:1px solid #c7d2fe; }
-.rank-help-bubble { display:none; position:absolute; top:20px; left:0; min-width:260px; max-width:340px; background:#ffffff; border:1px solid #e5e7eb; box-shadow:0 10px 24px rgba(0,0,0,0.12); border-radius:10px; padding:10px; z-index:10040; text-align:left; }
-.rank-help-wrap:hover .rank-help-bubble { display:block; }
-.rank-tip-title { font-size:12px; font-weight:700; color:#374151; margin-bottom:6px; }
-.rank-tip-row { display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:6px; }
-.rank-tip-rank { width:36px; flex:0 0 36px; font-size:12px; font-weight:700; color:#111827; }
-.rank-tip-name { flex:1 1 auto; min-width:0; font-size:12px; color:#374151; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.rank-tip-val { flex:0 0 auto; font-size:12px; font-weight:700; color:#111827; }
-
-</style>
-""", unsafe_allow_html=True)
 
 AUTH_CTX = require_app_auth()
 st.session_state["dashboard_auth"] = AUTH_CTX
