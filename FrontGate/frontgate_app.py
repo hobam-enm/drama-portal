@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
-
+import uuid
 import streamlit as st
 from streamlit.components.v1 import html as st_html
 
@@ -135,14 +135,16 @@ def delete_cookie(name: str):
         pass
 
 
-def inject_local_storage_set(token: str):
+def inject_local_storage_set(token: str, seq: Optional[str] = None):
     safe_token = json.dumps(token or "")
     safe_key = json.dumps(LOCAL_STORAGE_KEY)
+    nonce = json.dumps(seq or str(uuid.uuid4()))
     st_html(
         f"""
         <script>
         try {{
             window.localStorage.setItem({safe_key}, {safe_token});
+            window.localStorage.setItem("__frontgate_ls_nonce__", {nonce});
         }} catch (e) {{}}
         </script>
         """,
@@ -150,13 +152,15 @@ def inject_local_storage_set(token: str):
     )
 
 
-def inject_local_storage_remove():
+def inject_local_storage_remove(seq: Optional[str] = None):
     safe_key = json.dumps(LOCAL_STORAGE_KEY)
+    nonce = json.dumps(seq or str(uuid.uuid4()))
     st_html(
         f"""
         <script>
         try {{
             window.localStorage.removeItem({safe_key});
+            window.localStorage.setItem("__frontgate_ls_nonce__", {nonce});
         }} catch (e) {{}}
         </script>
         """,
@@ -164,13 +168,50 @@ def inject_local_storage_remove():
     )
 
 
-def get_local_storage_token() -> str:
+def inject_browser_session_set(token: str, days: int = 3):
+    safe_token = json.dumps(token or "")
+    safe_key = json.dumps(LOCAL_STORAGE_KEY)
+    cookie_name = json.dumps(COOKIE_NAME)
+    max_age = int(max(days, 1) * 86400)
+    st_html(
+        f"""
+        <script>
+        try {{
+            window.localStorage.setItem({safe_key}, {safe_token});
+            const encoded = encodeURIComponent({safe_token});
+            document.cookie = {cookie_name} + "=" + encoded + "; path=/; max-age={max_age}; SameSite=Lax; Secure";
+        }} catch (e) {{}}
+        setTimeout(function() {{ window.location.reload(); }}, 1100);
+        </script>
+        """,
+        height=0,
+    )
+
+
+def inject_browser_session_remove():
+    safe_key = json.dumps(LOCAL_STORAGE_KEY)
+    cookie_name = json.dumps(COOKIE_NAME)
+    st_html(
+        f"""
+        <script>
+        try {{
+            window.localStorage.removeItem({safe_key});
+            document.cookie = {cookie_name} + "=; path=/; max-age=0; SameSite=Lax; Secure";
+        }} catch (e) {{}}
+        </script>
+        """,
+        height=0,
+    )
+
+
+def get_local_storage_token(seq: Optional[str] = None) -> str:
     if streamlit_js_eval is None:
         return ""
     try:
+        key = f"frontgate_local_storage_token_{seq or uuid.uuid4().hex}"
         value = streamlit_js_eval(
             js_expressions=f"window.localStorage.getItem({json.dumps(LOCAL_STORAGE_KEY)})",
-            key="frontgate_local_storage_token",
+            key=key,
         )
         return str(value or "")
     except Exception:
@@ -483,9 +524,10 @@ def get_current_user() -> Optional[Dict[str, Any]]:
             if user:
                 st.session_state["current_user"] = user
                 st.session_state["_restore_bootstrap_count"] = 0
+                st.session_state.pop("_pending_login_finalize", None)
                 return user
 
-        ls_token = get_local_storage_token()
+        ls_token = get_local_storage_token(seq=f"boot_{bootstrap_count}")
         if ls_token and ls_token not in ("null", "undefined"):
             user = validate_session(ls_token)
             if user:
@@ -494,12 +536,13 @@ def get_current_user() -> Optional[Dict[str, Any]]:
                 st.session_state["current_user"] = user
                 st.session_state["_frontgate_ls_synced"] = ls_token
                 st.session_state["_restore_bootstrap_count"] = 0
+                st.session_state.pop("_pending_login_finalize", None)
                 return user
 
         if bootstrap_count < 2:
             st.session_state["_restore_bootstrap_count"] = bootstrap_count + 1
             get_cookie_manager()
-            get_local_storage_token()
+            get_local_storage_token(seq=f"bootstrap_{bootstrap_count}")
             st.rerun()
 
     # 과도기 fallback: front password or ?key=
@@ -523,7 +566,6 @@ def get_current_user() -> Optional[Dict[str, Any]]:
 def login_user(user: Dict[str, Any], remember: bool):
     if mongo_available():
         raw = create_session(user, remember=remember)
-        set_cookie(COOKIE_NAME, raw, days=int(AUTH.get("remember_me_days", 3)))
         current = {
             "id": str(user.get("id")),
             "name": str(user.get("name") or user.get("id")),
@@ -544,7 +586,10 @@ def login_user(user: Dict[str, Any], remember: bool):
     st.session_state["current_user"] = current
     st.session_state["_frontgate_restore_attempts"] = 0
     if current.get("session_token"):
-        inject_local_storage_set(str(current.get("session_token")))
+        st.session_state["_pending_login_finalize"] = {
+            "token": str(current.get("session_token")),
+            "days": int(AUTH.get("remember_me_days", 3)) if remember else 1,
+        }
         st.session_state["_frontgate_ls_synced"] = str(current.get("session_token"))
 
 
@@ -554,8 +599,9 @@ def logout_user():
     if raw:
         revoke_session(raw)
     delete_cookie(COOKIE_NAME)
-    inject_local_storage_remove()
+    inject_browser_session_remove()
     st.session_state.pop("current_user", None)
+    st.session_state.pop("_pending_login_finalize", None)
     st.session_state["_frontgate_restore_attempts"] = 0
     st.session_state["_frontgate_ls_synced"] = ""
     st.rerun()
@@ -962,6 +1008,19 @@ def render_header(user: Optional[Dict[str, Any]]):
     st.write("")
 
 
+
+
+def render_login_finalize():
+    pending = st.session_state.get("_pending_login_finalize") or {}
+    token = str(pending.get("token") or "")
+    if not token:
+        return False
+    days = int(pending.get("days") or int(AUTH.get("remember_me_days", 3) or 3))
+    st.markdown("### 로그인 중")
+    st.info("사이트에 접속하고 있습니다. 잠시만 기다려 주세요.")
+    inject_browser_session_set(token, days=days)
+    st.stop()
+
 def render_login_panel():
     st.markdown("### 🔐 포털 로그인")
     with st.form("login_form", clear_on_submit=False):
@@ -977,7 +1036,6 @@ def render_login_panel():
                 st.info("관리자 승인이 완료되었습니다. 아래 '새 비밀번호 설정'에서 비밀번호를 다시 설정해 주세요.")
             else:
                 login_user(user, remember=remember)
-                st.success("로그인되었습니다.")
                 st.rerun()
         else:
             st.error(msg or "로그인에 실패했습니다.")
@@ -1195,6 +1253,8 @@ def render_sidebar(user: Dict[str, Any]):
 # =========================================================
 # main
 # =========================================================
+render_login_finalize()
+
 user = get_current_user()
 render_header(user)
 
