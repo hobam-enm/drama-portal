@@ -316,16 +316,21 @@ def require_app_auth() -> Dict[str, Any]:
     auth_ctx = st.session_state.get("dashboard_auth")
     if auth_ctx:
         return auth_ctx
+
+    # 1) Prefer an existing app cookie for refresh continuity.
     auth_ctx = restore_from_cookie()
     if auth_ctx:
+        st.session_state["dashboard_auth"] = auth_ctx
         return auth_ctx
+
+    # 2) If user just arrived from the main dashboard, accept the handoff immediately.
+    # Do not force a rerun here. Reruns at this point can create a loading loop if the
+    # auth query param is still present or the cookie component has not synced yet.
     auth_ctx = consume_handoff()
     if auth_ctx:
         st.session_state["dashboard_auth"] = auth_ctx
-        # rerun only when we successfully persisted an app cookie
-        if get_cookie(COOKIE_NAME):
-            _rerun()
         return auth_ctx
+
     render_auth_required_and_stop()
     return {}
 
