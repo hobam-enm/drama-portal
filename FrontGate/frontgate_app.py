@@ -20,6 +20,11 @@ except Exception:
     stx = None
 
 try:
+    from streamlit_js_eval import streamlit_js_eval
+except Exception:
+    streamlit_js_eval = None
+
+try:
     from pymongo import MongoClient
     from pymongo.collection import Collection
 except Exception:
@@ -58,6 +63,7 @@ def get_auth_cfg() -> Dict[str, Any]:
     cfg.setdefault("token", "")
     cfg.setdefault("pepper", "")
     cfg.setdefault("signing_secret", "")
+    cfg.setdefault("local_storage_key", "drama_portal_auth")
     cfg.setdefault("cookie_name", "drama_portal_session")
     cfg.setdefault("admin_role_name", "admin")
     cfg.setdefault("default_role", "user")
@@ -78,6 +84,7 @@ def get_mongo_cfg() -> Dict[str, Any]:
 AUTH = get_auth_cfg()
 MONGO = get_mongo_cfg()
 COOKIE_NAME = AUTH["cookie_name"]
+LOCAL_STORAGE_KEY = str(AUTH.get("local_storage_key") or "drama_portal_auth")
 SIGNING_SECRET = str(AUTH.get("signing_secret") or "")
 PEPPER = str(AUTH.get("pepper") or "")
 
@@ -126,6 +133,48 @@ def delete_cookie(name: str):
         cm.delete(name)
     except Exception:
         pass
+
+
+def inject_local_storage_set(token: str):
+    safe_token = json.dumps(token or "")
+    safe_key = json.dumps(LOCAL_STORAGE_KEY)
+    st_html(
+        f"""
+        <script>
+        try {{
+            window.localStorage.setItem({safe_key}, {safe_token});
+        }} catch (e) {{}}
+        </script>
+        """,
+        height=0,
+    )
+
+
+def inject_local_storage_remove():
+    safe_key = json.dumps(LOCAL_STORAGE_KEY)
+    st_html(
+        f"""
+        <script>
+        try {{
+            window.localStorage.removeItem({safe_key});
+        }} catch (e) {{}}
+        </script>
+        """,
+        height=0,
+    )
+
+
+def get_local_storage_token() -> str:
+    if streamlit_js_eval is None:
+        return ""
+    try:
+        value = streamlit_js_eval(
+            js_expressions=f"window.localStorage.getItem({json.dumps(LOCAL_STORAGE_KEY)})",
+            key="frontgate_local_storage_token",
+        )
+        return str(value or "")
+    except Exception:
+        return ""
 
 
 # =========================================================
@@ -460,6 +509,10 @@ def login_user(user: Dict[str, Any], remember: bool):
             "session_token": "",
         }
     st.session_state["current_user"] = current
+    st.session_state["_frontgate_restore_attempts"] = 0
+    if current.get("session_token"):
+        inject_local_storage_set(str(current.get("session_token")))
+        st.session_state["_frontgate_ls_synced"] = str(current.get("session_token"))
 
 
 def logout_user():
@@ -468,7 +521,10 @@ def logout_user():
     if raw:
         revoke_session(raw)
     delete_cookie(COOKIE_NAME)
+    inject_local_storage_remove()
     st.session_state.pop("current_user", None)
+    st.session_state["_frontgate_restore_attempts"] = 0
+    st.session_state["_frontgate_ls_synced"] = ""
     st.rerun()
 
 
@@ -1123,6 +1179,10 @@ if user is None:
     with c2:
         render_signup_panel()
     st.stop()
+
+if user and user.get("session_token") and st.session_state.get("_frontgate_ls_synced") != str(user.get("session_token")):
+    inject_local_storage_set(str(user.get("session_token")))
+    st.session_state["_frontgate_ls_synced"] = str(user.get("session_token"))
 
 render_sidebar(user)
 admin_page = get_admin_page() if is_admin(user) else ""
