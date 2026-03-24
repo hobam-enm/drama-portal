@@ -158,6 +158,28 @@ def coll(name_key: str):
     return db[MONGO[name_key]]
 
 
+def ensure_mongo_indexes():
+    if not mongo_available():
+        return
+    if st.session_state.get("_frontgate_indexes_ready"):
+        return
+    try:
+        sessions = coll("sessions_coll")
+        if sessions is not None:
+            sessions.create_index("token_hash", unique=True, name="token_hash_unique")
+            sessions.create_index("user_id", name="user_id_idx")
+            sessions.create_index("delete_after", expireAfterSeconds=0, name="delete_after_ttl")
+        users = coll("users_coll")
+        if users is not None:
+            users.create_index("id", unique=True, name="user_id_unique")
+        reqs = coll("signup_requests_coll")
+        if reqs is not None:
+            reqs.create_index([("login_id", 1), ("status", 1)], name="signup_login_status_idx")
+        st.session_state["_frontgate_indexes_ready"] = True
+    except Exception:
+        pass
+
+
 # =========================================================
 # crypto / password
 # =========================================================
@@ -301,38 +323,49 @@ def create_session(user: Dict[str, Any], remember: bool = False, source_app: str
         "revoked_at": None,
         "is_active": True,
         "source_app": source_app,
+        "delete_after": expires_at + timedelta(days=1),
     }
     if mongo_available():
-        coll("sessions_coll").insert_one(session_doc)
+        sessions = coll("sessions_coll")
+        sessions.update_many(
+            {"user_id": str(user.get("id")), "is_active": True},
+            {"$set": {"is_active": False, "revoked_at": now, "delete_after": now + timedelta(days=1)}},
+        )
+        sessions.insert_one(session_doc)
     return raw
 
 
 def revoke_session(raw_token: str):
     if not raw_token or not mongo_available():
         return
+    now = utcnow()
     coll("sessions_coll").update_one(
         {"token_hash": token_hash(raw_token), "is_active": True},
-        {"$set": {"is_active": False, "revoked_at": utcnow()}},
+        {"$set": {"is_active": False, "revoked_at": now, "delete_after": now + timedelta(days=1)}},
     )
 
 
 def validate_session(raw_token: str) -> Optional[Dict[str, Any]]:
     if not raw_token or not mongo_available():
         return None
-    doc = coll("sessions_coll").find_one({"token_hash": token_hash(raw_token), "is_active": True})
+    sessions = coll("sessions_coll")
+    doc = sessions.find_one({"token_hash": token_hash(raw_token), "is_active": True})
     if not doc:
         return None
     now = utcnow()
     if doc.get("revoked_at") or doc.get("expires_at") is None or doc["expires_at"] < now:
+        sessions.update_one({"_id": doc["_id"]}, {"$set": {"is_active": False, "revoked_at": now, "delete_after": now + timedelta(days=1)}})
         return None
     idle_minutes = int(AUTH.get("session_idle_minutes", 120))
     last_seen = doc.get("last_seen_at") or doc.get("created_at") or now
     if last_seen + timedelta(minutes=idle_minutes) < now:
+        sessions.update_one({"_id": doc["_id"]}, {"$set": {"is_active": False, "revoked_at": now, "delete_after": now + timedelta(days=1)}})
         return None
     user = get_user_by_id(str(doc.get("user_id")))
     if not user or not bool(user.get("active", True)):
+        sessions.update_one({"_id": doc["_id"]}, {"$set": {"is_active": False, "revoked_at": now, "delete_after": now + timedelta(days=1)}})
         return None
-    coll("sessions_coll").update_one(
+    sessions.update_one(
         {"_id": doc["_id"]},
         {"$set": {"last_seen_at": now}},
     )
@@ -375,6 +408,11 @@ def get_current_user() -> Optional[Dict[str, Any]]:
         return st.session_state["current_user"]
 
     if mongo_available():
+        # CookieManager 값이 새로고침 직후 첫 렌더에서 늦게 들어오는 경우가 있어 1회 부트스트랩 rerun
+        if not st.session_state.get("_cookie_bootstrap_done"):
+            st.session_state["_cookie_bootstrap_done"] = True
+            get_cookie_manager()
+            st.rerun()
         cookie_token = get_cookie(COOKIE_NAME)
         if cookie_token:
             user = validate_session(cookie_token)
