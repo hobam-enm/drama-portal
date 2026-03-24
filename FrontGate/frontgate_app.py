@@ -702,6 +702,21 @@ def app_meta(key: str) -> Dict[str, str]:
     return meta
 
 
+def clean_allowed_apps(values: Optional[List[str]], options: List[str]) -> List[str]:
+    valid = set(options)
+    return [v for v in list(values or []) if v in valid]
+
+
+def get_admin_page() -> str:
+    page = str(st.session_state.get("admin_page") or "")
+    return page if page in {"signup_requests", "password_resets", "member_management"} else ""
+
+
+def set_admin_page(page: str):
+    st.session_state["admin_page"] = page
+
+
+
 def build_cards_html(user: Dict[str, Any], keys: List[str]) -> str:
     html_parts = []
     allowed = set(user.get("allowed_apps") or [])
@@ -886,93 +901,94 @@ def render_signup_panel():
 
 
 
-def render_admin_panel(admin_user: Dict[str, Any], container=None):
-    ui = container if container is not None else st
-    ui.markdown("### 🛠 관리자")
-    tab1, tab2, tab3 = ui.tabs(["가입 요청", "비밀번호 재설정", "멤버 관리"])
+def render_admin_panel(admin_user: Dict[str, Any], page: str):
+    st.markdown("### 🛠 관리자 페이지")
 
     app_keys = [k for k in apps_config().keys() if k != "frontgate"]
     app_labels = {k: app_meta(k)["title"] for k in app_keys}
     permission_options = ["user_manage", "approve_signup", "session_manage", "ytan_admin"]
 
-    with tab1:
+    if page == "signup_requests":
+        st.caption("가입 요청 검토 및 승인")
         reqs = get_signup_requests("pending")
         signup_reqs = [r for r in reqs if str(r.get("type") or "signup") == "signup"]
         if not signup_reqs:
-            ui.info("대기 중인 가입 요청이 없습니다.")
+            st.info("대기 중인 가입 요청이 없습니다.")
         for req in signup_reqs:
             req_id = str(req.get("_id"))
-            default_apps = list(req.get("requested_apps") or [])
-            with ui.expander(f"[대기] {req.get('name')} · {req.get('login_id')}"):
-                ui.write(f"- 이메일: {req.get('email') or '-'}")
-                ui.write(f"- 부서: {req.get('department') or '-'}")
-                ui.write(f"- 요청 앱: {', '.join(default_apps) or '-'}")
-                ui.write(f"- 사유: {req.get('reason') or '-'}")
-                ui.write(f"- 요청시각: {req.get('requested_at')}")
-                selected_apps = ui.multiselect(
+            default_apps = clean_allowed_apps(req.get("requested_apps") or [], app_keys)
+            with st.expander(f"[대기] {req.get('name')} · {req.get('login_id')}"):
+                st.write(f"- 이메일: {req.get('email') or '-'}")
+                st.write(f"- 부서: {req.get('department') or '-'}")
+                st.write(f"- 요청 앱: {', '.join(default_apps) or '-'}")
+                st.write(f"- 사유: {req.get('reason') or '-'}")
+                st.write(f"- 요청시각: {req.get('requested_at')}")
+                selected_apps = st.multiselect(
                     "승인할 접근 가능 서비스",
                     app_keys,
                     default=default_apps,
                     format_func=lambda x: app_labels.get(x, x),
                     key=f"approve_apps_{req_id}",
                 )
-                approved_role = ui.selectbox(
+                approved_role = st.selectbox(
                     "권한",
                     [AUTH["default_role"], AUTH["admin_role_name"]],
                     index=0,
                     key=f"approve_role_{req_id}",
                 )
-                approved_permissions = ui.multiselect(
+                approved_permissions = st.multiselect(
                     "추가 권한",
                     permission_options,
                     default=[],
                     key=f"approve_perms_{req_id}",
                 )
-                c1, c2 = ui.columns(2)
+                c1, c2 = st.columns(2)
                 with c1:
-                    if ui.button("승인", key=f"approve_{req_id}", use_container_width=True):
+                    if st.button("승인", key=f"approve_{req_id}", use_container_width=True):
                         approve_request(req, admin_user, allowed_apps=selected_apps, role=approved_role, permissions=approved_permissions)
-                        ui.success("승인 완료")
+                        st.success("승인 완료")
                         st.rerun()
                 with c2:
-                    note = ui.text_input("반려 메모", key=f"rej_note_{req_id}")
-                    if ui.button("반려", key=f"reject_{req_id}", use_container_width=True):
+                    note = st.text_input("반려 메모", key=f"rej_note_{req_id}")
+                    if st.button("반려", key=f"reject_{req_id}", use_container_width=True):
                         reject_request(req["_id"], admin_user, note)
-                        ui.success("반려 처리 완료")
+                        st.success("반려 처리 완료")
                         st.rerun()
 
-    with tab2:
+    elif page == "password_resets":
+        st.caption("비밀번호 재설정 요청 승인")
         reqs = get_signup_requests("pending")
         pw_reqs = [r for r in reqs if str(r.get("type") or "") == "password_reset"]
         if not pw_reqs:
-            ui.info("대기 중인 비밀번호 재설정 요청이 없습니다.")
+            st.info("대기 중인 비밀번호 재설정 요청이 없습니다.")
         for req in pw_reqs:
             req_id = str(req.get("_id"))
-            with ui.expander(f"[대기] 비밀번호 재설정 · {req.get('login_id')}"):
-                ui.write(f"- 이름: {req.get('name') or '-'}")
-                ui.write(f"- 이메일: {req.get('email') or '-'}")
-                ui.write(f"- 메모: {req.get('reason') or '-'}")
-                ui.write(f"- 요청시각: {req.get('requested_at')}")
-                c1, c2 = ui.columns(2)
+            with st.expander(f"[대기] 비밀번호 재설정 · {req.get('login_id')}"):
+                st.write(f"- 이름: {req.get('name') or '-'}")
+                st.write(f"- 이메일: {req.get('email') or '-'}")
+                st.write(f"- 메모: {req.get('reason') or '-'}")
+                st.write(f"- 요청시각: {req.get('requested_at')}")
+                c1, c2 = st.columns(2)
                 with c1:
-                    if ui.button("승인", key=f"pw_approve_{req_id}", use_container_width=True):
+                    if st.button("승인", key=f"pw_approve_{req_id}", use_container_width=True):
                         approve_password_reset_request(req, admin_user)
-                        ui.success("재설정 승인 완료")
+                        st.success("재설정 승인 완료")
                         st.rerun()
                 with c2:
-                    note = ui.text_input("반려 메모", key=f"pw_rej_note_{req_id}")
-                    if ui.button("반려", key=f"pw_reject_{req_id}", use_container_width=True):
+                    note = st.text_input("반려 메모", key=f"pw_rej_note_{req_id}")
+                    if st.button("반려", key=f"pw_reject_{req_id}", use_container_width=True):
                         reject_request(req["_id"], admin_user, note)
-                        ui.success("반려 처리 완료")
+                        st.success("반려 처리 완료")
                         st.rerun()
 
-    with tab3:
+    elif page == "member_management":
+        st.caption("멤버 상태와 서비스 접근 권한 관리")
         users = list_users()
         if not users:
-            ui.info("사용자가 없습니다.")
+            st.info("사용자가 없습니다.")
 
-        with ui.expander("새 계정 생성", expanded=False):
-            with ui.form("admin_create_user_form", clear_on_submit=True):
+        with st.expander("새 계정 생성", expanded=False):
+            with st.form("admin_create_user_form", clear_on_submit=True):
                 login_id = st.text_input("아이디 *", key="admin_create_login_id")
                 name = st.text_input("이름 *", key="admin_create_name")
                 password = st.text_input("비밀번호 *", type="password", key="admin_create_password")
@@ -985,53 +1001,68 @@ def render_admin_panel(admin_user: Dict[str, Any], container=None):
                 submitted = st.form_submit_button("계정 생성", use_container_width=True)
             if submitted:
                 ok, msg = create_user_by_admin(admin_user, login_id, name, password, password_confirm, role, allowed_apps, permissions, email, department)
-                (ui.success if ok else ui.error)(msg)
+                (st.success if ok else st.error)(msg)
                 if ok:
                     st.rerun()
 
         for u in users:
             uid = str(u.get("id"))
-            with ui.expander(f"{u.get('name') or uid} · {uid}"):
+            with st.expander(f"{u.get('name') or uid} · {uid}"):
                 role_options = [AUTH["default_role"], AUTH["admin_role_name"]]
                 current_role = str(u.get("role") or AUTH["default_role"])
                 if current_role not in role_options:
                     role_options.append(current_role)
 
-                new_role = ui.selectbox("권한", role_options, index=role_options.index(current_role), key=f"user_role_{uid}")
-                new_apps = ui.multiselect(
+                new_role = st.selectbox("권한", role_options, index=role_options.index(current_role), key=f"user_role_{uid}")
+                user_default_apps = clean_allowed_apps(u.get("allowed_apps") or [], app_keys)
+                new_apps = st.multiselect(
                     "접근 가능 서비스",
                     app_keys,
-                    default=list(u.get("allowed_apps") or []),
+                    default=user_default_apps,
                     format_func=lambda x: app_labels.get(x, x),
                     key=f"user_apps_{uid}",
                 )
-                new_perms = ui.multiselect(
+                new_perms = st.multiselect(
                     "추가 권한",
                     permission_options,
                     default=[p for p in list(u.get("permissions") or []) if p in permission_options],
                     key=f"user_perms_{uid}",
                 )
-                c1, c2 = ui.columns(2)
+                c1, c2 = st.columns(2)
                 with c1:
-                    if mongo_available() and ui.button("권한 저장", key=f"save_access_{uid}", use_container_width=True):
+                    if mongo_available() and st.button("권한 저장", key=f"save_access_{uid}", use_container_width=True):
                         update_user_access(uid, new_apps, role=new_role, permissions=new_perms)
-                        ui.success("접근 권한이 저장되었습니다.")
+                        st.success("접근 권한이 저장되었습니다.")
                         st.rerun()
                 with c2:
                     if mongo_available() and uid != str(admin_user.get("id")):
                         currently_active = bool(u.get("active", True))
                         label = "비활성화" if currently_active else "활성화"
-                        if ui.button(label, key=f"toggle_{uid}", use_container_width=True):
+                        if st.button(label, key=f"toggle_{uid}", use_container_width=True):
                             toggle_user_active(uid, not currently_active)
-                            ui.success("상태가 변경되었습니다.")
+                            st.success("상태가 변경되었습니다.")
                             st.rerun()
-                ui.caption(f"현재 상태: {'활성' if bool(u.get('active', True)) else '비활성'}")
+                st.caption(f"현재 상태: {'활성' if bool(u.get('active', True)) else '비활성'}")
+
 
 
 def render_sidebar(user: Dict[str, Any]):
     with st.sidebar:
+        st.markdown("### 메뉴")
         if is_admin(user):
-            render_admin_panel(user, container=st.sidebar)
+            st.caption("관리자 페이지")
+            if st.button("가입 요청", use_container_width=True):
+                set_admin_page("signup_requests")
+                st.rerun()
+            if st.button("비밀번호 재설정", use_container_width=True):
+                set_admin_page("password_resets")
+                st.rerun()
+            if st.button("멤버 관리", use_container_width=True):
+                set_admin_page("member_management")
+                st.rerun()
+            if get_admin_page() and st.button("서비스 홈으로", use_container_width=True):
+                set_admin_page("")
+                st.rerun()
 
 
 # =========================================================
@@ -1056,7 +1087,11 @@ if user is None:
     st.stop()
 
 render_sidebar(user)
-render_card_rows(user)
+admin_page = get_admin_page() if is_admin(user) else ""
+if admin_page:
+    render_admin_panel(user, admin_page)
+else:
+    render_card_rows(user)
 
 st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 if st.button("로그아웃", use_container_width=True):
