@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+import sys
 import glob
 import json
 import time
@@ -33,6 +34,13 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
+
+from frontgate.auth_utils import check_auth
+
 # region [1. 설정 및 상수 (Config & Constants)]
 # ==========================================
 st.set_page_config(
@@ -44,97 +52,33 @@ st.set_page_config(
 # endregion
 
 
-# region [1-1. 입장게이트 (보안 인증)]
+# region [1-1. 공통 인증 및 Secrets 복원]
 # ==========================================
-def _rerun():
-    """스트림릿 버전 호환 리런 함수"""
-    if hasattr(st, "rerun"): st.rerun()
-    else: st.experimental_rerun()
-
-def get_cookie_manager():
-    return stx.CookieManager(key="yt_auth_cookie_manager")
-
-def _hash_password(password: str) -> str:
-    return hashlib.sha256(str(password).encode()).hexdigest()
-
-def check_password_with_cookie() -> bool:
-    cookie_manager = get_cookie_manager()
-    secret_pwd = st.secrets.get("DASHBOARD_PASSWORD")
-    if not secret_pwd:
-        if "general" in st.secrets: secret_pwd = st.secrets["general"].get("DASHBOARD_PASSWORD")
-            
-    if not secret_pwd:
-        st.error("🔒 설정 오류: Secrets에 'DASHBOARD_PASSWORD'가 설정되지 않았습니다.")
-        st.stop()
-        
-    hashed_secret = _hash_password(str(secret_pwd))
-    cookies = cookie_manager.get_all()
-    COOKIE_NAME = "yt_dashboard_auth"
-    current_token = cookies.get(COOKIE_NAME)
-    
-    is_cookie_valid = (current_token == hashed_secret)
-    is_session_valid = st.session_state.get("auth_success", False)
-    
-    if is_cookie_valid or is_session_valid:
-        if is_cookie_valid and not is_session_valid:
-            st.session_state["auth_success"] = True
-        return True
-
-    st.markdown("#### 🔒 Access Restricted")
-    st.caption("관계자 외 접근이 제한된 페이지입니다.")
-    
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        input_pwd = st.text_input("Password", type="password", key="login_pw_input")
-        login_btn = st.button("Login", type="primary", use_container_width=True)
-
-    if login_btn:
-        if _hash_password(input_pwd) == hashed_secret:
-            expires = datetime.now() + timedelta(days=1)
-            cookie_manager.set(COOKIE_NAME, hashed_secret, expires_at=expires)
-            st.session_state["auth_success"] = True
-            st.success("✅ 인증 성공")
-            time.sleep(0.5)
-            _rerun()
-        else:
-            st.error("❌ 비밀번호가 일치하지 않습니다.")
-    return False
-
-if not check_password_with_cookie(): st.stop()
-# endregion
+current_user = check_auth("yt_datacrawler")
+auth_section = st.secrets.get("auth", {})
+admin_role_name = str(auth_section.get("admin_role_name", "admin")).strip() or "admin"
+current_role = str(current_user.get("role", "")).strip()
+current_user_id = str(current_user.get("id") or current_user.get("user_id") or current_user.get("username") or current_user.get("sub") or "").strip()
+current_user_name = str(current_user.get("name") or current_user.get("display_name") or current_user_id or "").strip()
+is_admin = current_role == admin_role_name
 
 
-# region [1-2. 배포 환경 설정 (Secrets 복원)]
-# ==========================================
-def _restore_token_files_from_secrets():
-    """Restore token_*.json files from secrets.
-
-    Preferred path: [yt_datacrawler.tokens]
-    Backward-compatible fallback: top-level [tokens]
-    """
+def _restore_token_files_from_secrets() -> None:
     tokens_map = {}
-
-    try:
-        ytc_section = st.secrets.get("yt_datacrawler", {})
-        if isinstance(ytc_section, dict) and isinstance(ytc_section.get("tokens", {}), dict):
-            tokens_map = dict(ytc_section.get("tokens", {}))
-    except Exception:
-        tokens_map = {}
-
-    if not tokens_map:
-        try:
-            legacy_tokens = st.secrets.get("tokens", {})
-            if isinstance(legacy_tokens, dict):
-                tokens_map = dict(legacy_tokens)
-        except Exception:
-            tokens_map = {}
+    yt_section = st.secrets.get("yt_datacrawler", {})
+    if isinstance(yt_section, dict) and isinstance(yt_section.get("tokens"), dict):
+        tokens_map = dict(yt_section.get("tokens", {}))
+    elif isinstance(st.secrets.get("tokens"), dict):
+        tokens_map = dict(st.secrets.get("tokens", {}))
 
     for file_name, content in tokens_map.items():
-        if not str(file_name).endswith(".json"):
-            file_name = f"{file_name}.json"
-        if not os.path.exists(file_name):
-            with open(file_name, "w", encoding="utf-8") as f:
+        target_name = str(file_name)
+        if not target_name.endswith(".json"):
+            target_name += ".json"
+        if not os.path.exists(target_name):
+            with open(target_name, "w", encoding="utf-8") as f:
                 f.write(str(content))
+
 
 _restore_token_files_from_secrets()
 # endregion
@@ -986,19 +930,21 @@ with st.expander("🔌 연결된 채널 리스트 / 연결 상태 보기", expan
         st.dataframe(df_conn, use_container_width=True, hide_index=True)
     else:
         st.info("확인 가능한 token_*.json 파일이 없습니다.")
+        st.caption("현재 코드만으로는 '연결되어야 할 전체 채널 마스터 목록'이 없어서, 존재하지 않는 채널까지 미연결로 자동 표기하진 못합니다.")
 
 
 with st.sidebar:
     st.header("🎛️ 데이터 관리")
-    if 'admin_auth' not in st.session_state: st.session_state['admin_auth'] = False
-    
-    if not st.session_state['admin_auth']:
-        if st.text_input("관리자 비밀번호", type="password") == st.secrets.get("admin",{}).get("password",""):
-            st.session_state['admin_auth'] = True; st.rerun()
-            
-    if st.session_state['admin_auth']:
+    user_label = current_user_id or current_user_name or "unknown"
+    st.caption(f"접속중: {user_label}")
+    if current_user_name and current_user_name != user_label:
+        st.caption(f"이름: {current_user_name}")
+    role_badge = "관리자" if is_admin else "일반"
+    st.caption(f"권한: {role_badge} ({current_role or 'none'})")
+    st.markdown("---")
+
+    if is_admin:
         token_files = glob.glob("token_*.json")
-        st.markdown("---")
 
         with st.expander("🔌 채널 연결 상태", expanded=False):
             if token_files:
@@ -1012,26 +958,30 @@ with st.sidebar:
                 st.caption(f"연결됨 {connected_cnt}개 / 미연결 {disconnected_cnt}개")
             else:
                 st.warning("token_*.json 파일이 없어 연결 상태를 확인할 채널이 없습니다.")
-        
+                st.caption("※ 현재 구조상 '예상 채널 목록'이 없으면, 파일이 아예 없는 채널까지 자동 식별할 수는 없습니다.")
+
         if token_files:
             last_ts = get_last_update_time(f"cache_{os.path.basename(token_files[0])}")
-            if last_ts: st.info(f"🕒 DB 최신화: {last_ts}")
-        
+            if last_ts:
+                st.info(f"🕒 DB 최신화: {last_ts}")
+
         if st.button("🔄 최신 영상 업데이트 (수동)", type="primary", use_container_width=True):
             st.session_state['channels_data'] = []
             ph = {tf: st.empty() for tf in token_files}
             ready = []
             ctx = get_script_run_ctx()
-            def worker(tf, sb): 
+
+            def worker(tf, sb):
                 add_script_run_ctx(ctx=ctx)
                 return process_sync_channel(tf, sb, update_source="manual")
-            
+
             with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
                 fs = {ex.submit(worker, tf, ph[tf]): tf for tf in token_files}
                 for f in as_completed(fs):
                     r = f.result()
-                    if r and 'name' in r: ready.append(r)
-            
+                    if r and 'name' in r:
+                        ready.append(r)
+
             if ready:
                 st.success("업데이트 완료!")
                 load_from_mongodb.clear()
@@ -1040,32 +990,27 @@ with st.sidebar:
                 st.rerun()
 
         st.markdown("---")
-        
+
         with st.expander("⚠️ DB 초기화 및 전체 재수집"):
-            if 'admin_unlocked' not in st.session_state: st.session_state['admin_unlocked'] = False
-            if not st.session_state['admin_unlocked']:
-                if st.text_input("2차 비밀번호", type="password") == "dima1234":
-                    st.session_state['admin_unlocked'] = True; st.rerun()
-            
-            if st.session_state['admin_unlocked']:
-                st.warning("경고: 모든 데이터를 새로 수집합니다.")
-                if st.button("🔥 전체 데이터 덮어쓰기", type="secondary"):
-                    st.session_state['channels_data'] = []
-                    ph = {tf: st.empty() for tf in token_files}
-                    ready = []
-                    ctx = get_script_run_ctx()
-                    
-                    def deep_worker(tf, sb):
-                        add_script_run_ctx(ctx=ctx)
-                        try:
-                            client = init_mongo()
-                            db = client.get_database("yt_dashboard")
-                            cache_n = f"cache_{os.path.basename(tf)}"
-                            db.get_collection("metadata").delete_one({"_id": cache_n})
-                            db.get_collection("videos").delete_many({"source_file": cache_n})
-                        except: pass
-                        
-                        return process_sync_channel(tf, sb, update_source="manual_reset")
+            st.warning("경고: 모든 데이터를 새로 수집합니다.")
+            if st.button("🔥 전체 데이터 덮어쓰기", type="secondary"):
+                st.session_state['channels_data'] = []
+                ph = {tf: st.empty() for tf in token_files}
+                ready = []
+                ctx = get_script_run_ctx()
+
+                def deep_worker(tf, sb):
+                    add_script_run_ctx(ctx=ctx)
+                    try:
+                        client = init_mongo()
+                        db = client.get_database("yt_dashboard")
+                        cache_n = f"cache_{os.path.basename(tf)}"
+                        db.get_collection("metadata").delete_one({"_id": cache_n})
+                        db.get_collection("videos").delete_many({"source_file": cache_n})
+                    except:
+                        pass
+
+                    return process_sync_channel(tf, sb, update_source="manual_reset")
                         
                     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
                         fs = {ex.submit(deep_worker, tf, ph[tf]): tf for tf in token_files}
