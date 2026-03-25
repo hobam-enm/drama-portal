@@ -1094,7 +1094,6 @@ def render_login_panel():
 
 def render_signup_panel():
     st.markdown("### 📨 접근 요청")
-    st.caption("비밀번호는 사용자가 직접 정하고, 관리자는 요청 승인만 합니다.")
     app_keys = [k for k in apps_config().keys() if k != "frontgate"]
     labels = {k: app_meta(k)["title"] for k in app_keys}
     with st.form("signup_request_form", clear_on_submit=True):
