@@ -35,8 +35,7 @@ st.set_page_config(
 )
 
 
-# =====================================================
-#endregion
+
 
 st.markdown("""
 <style>
@@ -308,34 +307,6 @@ div[data-testid="column"]:has(.rank-help-wrap:hover) {
 
 
 # =====================================================
-
-#region [ 3. 인증/쿠키 게이트 ]
-
-# ===== 1. 통합 포털 경로 추가 =====
-# 현재 파일(Dashboard.py) 위치를 기준으로 상위 폴더(레포지토리 루트)를 파이썬 경로에 추가합니다.
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-if parent_dir not in sys.path:
-    sys.path.append(parent_dir)
-
-
-# ===== 2. 통합 포털 인증 게이트 =====
-# 이제 파이썬이 상위 폴더에 있는 frontgate 모듈을 정상적으로 찾을 수 있습니다.
-from frontgate.auth_utils import check_auth
-
-current_user = check_auth("data_dashboard")
-
-def _rerun():
-    if hasattr(st, "rerun"):
-        st.rerun()
-    else:
-        st.experimental_rerun()
-
-
-
-
-# =====================================================
-
 
 # ===== 네비게이션 아이템 정의 =====
 NAV_ITEMS = {
