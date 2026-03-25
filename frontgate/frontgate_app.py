@@ -16,8 +16,6 @@ from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 import streamlit as st
 from streamlit.components.v1 import html as st_html
 
-from data_dashboard.dashboard_page import render_dashboard_page
-
 try:
     import extra_streamlit_components as stx
 except Exception:
@@ -42,7 +40,7 @@ UTC = timezone.utc
 # =========================================================
 # page
 # =========================================================
-st.set_page_config(page_title="드라마 마케팅 대시보드", page_icon="🧭", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="드라마 데이터 포털", page_icon="🧭", layout="wide", initial_sidebar_state="collapsed")
 
 
 # =========================================================
@@ -1013,7 +1011,7 @@ def render_header(user: Optional[Dict[str, Any]]):
         """,
         unsafe_allow_html=True,
     )
-    st.markdown("<div class='grad-title'>드라마 마케팅 대시보드</div>", unsafe_allow_html=True)
+    st.markdown("<div class='grad-title'>드라마 데이터 포털</div>", unsafe_allow_html=True)
     st.markdown("<div class='grad-sub'>문의: 미디어)마케팅팀 데이터인사이트파트</div>", unsafe_allow_html=True)
     st.write("")
 
@@ -1090,7 +1088,8 @@ def render_login_panel():
 
 
 def render_signup_panel():
-    st.markdown("### 📨 가입 요청")
+    st.markdown("### 📨 접근 요청")
+    st.caption("비밀번호는 사용자가 직접 정하고, 관리자는 요청 승인만 합니다.")
     app_keys = [k for k in apps_config().keys() if k != "frontgate"]
     labels = {k: app_meta(k)["title"] for k in app_keys}
     with st.form("signup_request_form", clear_on_submit=True):
@@ -1283,6 +1282,8 @@ render_header(user)
 
 if not mongo_available():
     st.warning("MongoDB 연결이 없어 중앙 세션/가입요청/관리자 기능 일부가 제한됩니다. 통합 secrets의 [mongo].uri를 확인하세요.")
+if not SIGNING_SECRET:
+    st.warning("auth.signing_secret 이 비어 있어 세부 앱으로 전달되는 auth 토큰이 비서명 상태입니다. 통합 secrets를 확인하세요.")
 if not PEPPER:
     st.warning("auth.pepper 가 비어 있어 계정 비밀번호 검증이 정상 동작하지 않을 수 있습니다.")
 
@@ -1298,17 +1299,6 @@ if user and user.get("session_token") and st.session_state.get("_frontgate_ls_sy
     inject_local_storage_set(str(user.get("session_token")))
     st.session_state["_frontgate_ls_synced"] = str(user.get("session_token"))
 
-current_app = str(st.query_params.get("app", "home") or "home")
-if current_app == "data_dashboard":
-    if not (is_admin(user) or ("data_dashboard" in set(user.get("allowed_apps") or []))):
-        st.error("데이터 대시보드 접근 권한이 없습니다.")
-        if st.button("서비스 홈으로 돌아가기", use_container_width=True):
-            st.query_params["app"] = "home"
-            st.rerun()
-        st.stop()
-    render_dashboard_page(user)
-    st.stop()
-
 render_sidebar(user)
 admin_page = get_admin_page() if is_admin(user) else ""
 if admin_page:
@@ -1321,4 +1311,4 @@ if st.button("로그아웃", use_container_width=True):
     logout_user()
 
 st.markdown("<hr style='margin-top:30px; opacity:.2;'>", unsafe_allow_html=True)
-st.markdown("<p style='text-align:center; opacity:.65;'>© 드라마 마케팅 대시보드</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center; opacity:.65;'>© 드라마 데이터 포털</p>", unsafe_allow_html=True)
