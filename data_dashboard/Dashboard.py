@@ -397,13 +397,13 @@ def load_data() -> pd.DataFrame:
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
     
     try:
-        creds_info = st.secrets["gcp_service_account"]
+        creds_info = st.secrets["google"]["service_account"]
         creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
         client = gspread.authorize(creds)
 
         # --- 2. 데이터 로드 ---
-        sheet_id = st.secrets["SHEET_ID"]
-        worksheet_name = st.secrets["SHEET_NAME"] 
+        sheet_id = st.secrets["data_dashboard"]["sheet_id"]
+        worksheet_name = st.secrets["data_dashboard"]["sheet_name"]
         
         spreadsheet = client.open_by_key(sheet_id)
         worksheet = spreadsheet.worksheet(worksheet_name)
