@@ -676,7 +676,7 @@ def submit_signup_request(name: str, login_id: str, password: str, password_conf
     if existing:
         return False, "이미 대기 중인 요청이 있습니다."
     c.insert_one(req)
-    return True, "접근 요청이 접수되었습니다. 승인 후 해당 비밀번호로 로그인할 수 있습니다."
+    return True, "권한 요청이 접수되었습니다. 승인 후 해당 비밀번호로 로그인할 수 있습니다."
 
 
 def get_signup_requests(status: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -855,6 +855,57 @@ def update_user_access(user_id: str, allowed_apps: List[str], role: Optional[str
     if permissions is not None:
         update_doc["permissions"] = list(permissions or [])
     coll("users_coll").update_one({"id": user_id}, {"$set": update_doc})
+
+
+def format_dt_kst(dt: Any, default: str = "-") -> str:
+    parsed = ensure_utc(dt)
+    if parsed is None:
+        return default
+    return parsed.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def get_user_session_summary(user_id: str) -> Dict[str, Any]:
+    summary = {
+        "active_session_count": 0,
+        "last_seen_at": None,
+        "last_source_app": None,
+    }
+    if not mongo_available():
+        return summary
+
+    sessions = coll("sessions_coll")
+    if sessions is None:
+        return summary
+
+    now = utcnow()
+    idle_minutes = int(AUTH.get("session_idle_minutes", 120) or 120)
+    active_query = {
+        "user_id": str(user_id),
+        "is_active": True,
+        "revoked_at": None,
+        "expires_at": {"$gte": now},
+        "$or": [
+            {"last_seen_at": {"$gte": now - timedelta(minutes=idle_minutes)}},
+            {
+                "$and": [
+                    {"last_seen_at": None},
+                    {"created_at": {"$gte": now - timedelta(minutes=idle_minutes)}},
+                ]
+            },
+        ],
+    }
+    try:
+        summary["active_session_count"] = int(sessions.count_documents(active_query))
+        latest_doc = sessions.find_one(
+            {"user_id": str(user_id)},
+            sort=[("last_seen_at", -1), ("created_at", -1)],
+        )
+        if latest_doc:
+            summary["last_seen_at"] = latest_doc.get("last_seen_at") or latest_doc.get("created_at")
+            summary["last_source_app"] = latest_doc.get("source_app") or "-"
+    except Exception:
+        return summary
+    return summary
 
 
 # =========================================================
@@ -1100,7 +1151,7 @@ def render_login_panel():
 
 
 def render_signup_panel():
-    st.markdown("### 📨 접근 요청")
+    st.markdown("### 📨 권한 요청")
     app_keys = [k for k in apps_config().keys() if k != "frontgate"]
     labels = {k: app_meta(k)["title"] for k in app_keys}
     with st.form("signup_request_form", clear_on_submit=True):
@@ -1112,7 +1163,7 @@ def render_signup_panel():
         department = st.text_input("부서")
         requested_apps = st.multiselect("사용 희망 서비스", app_keys, format_func=lambda x: labels.get(x, x))
         reason = st.text_area("사용 목적", height=120, placeholder="예: tvN 드라마 성과 모니터링 및 리포트 참고")
-        submitted = st.form_submit_button("접근 요청 보내기", use_container_width=True)
+        submitted = st.form_submit_button("권한 요청 보내기", use_container_width=True)
     if submitted:
         ok, msg = submit_signup_request(name, login_id, password, password_confirm, email, department, reason, requested_apps)
         (st.success if ok else st.error)(msg)
@@ -1225,7 +1276,14 @@ def render_admin_panel(admin_user: Dict[str, Any], page: str):
 
         for u in users:
             uid = str(u.get("id"))
+            session_summary = get_user_session_summary(uid)
             with st.expander(f"{u.get('name') or uid} · {uid}"):
+                info_col1, info_col2, info_col3 = st.columns(3)
+                info_col1.metric("최근 접속", format_dt_kst(session_summary.get("last_seen_at")))
+                info_col2.metric("마지막 접속 앱", str(session_summary.get("last_source_app") or "-"))
+                info_col3.metric("현재 활성 세션 수", int(session_summary.get("active_session_count") or 0))
+                st.caption(f"현재 상태: {'활성' if bool(u.get('active', True)) else '비활성'}")
+
                 role_options = [AUTH["default_role"], AUTH["admin_role_name"]]
                 current_role = str(u.get("role") or AUTH["default_role"])
                 if current_role not in role_options:
@@ -1260,7 +1318,6 @@ def render_admin_panel(admin_user: Dict[str, Any], page: str):
                             toggle_user_active(uid, not currently_active)
                             st.success("상태가 변경되었습니다.")
                             st.rerun()
-                st.caption(f"현재 상태: {'활성' if bool(u.get('active', True)) else '비활성'}")
 
 
 
