@@ -951,6 +951,11 @@ def build_cards_html(user: Dict[str, Any], keys: List[str]) -> str:
     return "".join(html_parts)
 
 
+def _go_internal_app(app_key: str):
+    st.query_params["app"] = app_key
+    st.rerun()
+
+
 def render_card_rows(user: Dict[str, Any]):
     all_keys = [k for k in apps_config().keys() if k != "frontgate"]
     row1 = [k for k in ["data_dashboard", "ip_briefing", "insightlab"] if k in all_keys]
@@ -959,168 +964,69 @@ def render_card_rows(user: Dict[str, Any]):
     if rest:
         row2.extend(rest)
 
-    row1_html = build_cards_html(user, row1)
-    row2_html = build_cards_html(user, row2)
+    allowed = set(user.get("allowed_apps") or [])
+    internal_apps = {"data_dashboard", "chatbot", "yt_datacrawler"}
+    external_apps = {"insightlab", "ip_briefing"}
+    url_map = apps_config()
 
-    st_html(
-        f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-        <meta charset="utf-8" />
-        <style>
-          :root {{ --card-w: 360px; --thumb-h: 220px; }}
-          body {{ margin:0; padding:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto; }}
-          .zone {{ margin: 8px 0 28px 0; padding: 0 6px; }}
-          .zone-title {{ font-weight: 800; opacity:.88; margin: 0 0 12px 0; font-size: 1.08rem; text-align:center; }}
-          .scroll-wrap {{ position: relative; }}
-          .row-scroll {{ display:flex; justify-content:center; gap:24px; overflow-x:auto; overflow-y:hidden; padding:8px 4px 18px 4px; scrollbar-width:none; }}
-          .row-scroll::-webkit-scrollbar {{ display:none; }}
-          .card {{ position:relative; flex:0 0 var(--card-w); width:var(--card-w); background:rgba(255,255,255,.94); border:1px solid rgba(0,0,0,.06); border-radius:18px; box-shadow:0 10px 28px rgba(0,0,0,.12); overflow:hidden; transition:transform .2s ease; }}
-          .card:hover {{ transform:translateY(-4px); }}
-          .thumb-wrap {{ width:100%; height:var(--thumb-h); background:#0f1116; }}
-          .thumb {{ width:100%; height:100%; object-fit:cover; object-position:center; display:block; }}
-          .body {{ padding:14px 18px 18px 18px; }}
-          .title {{ font-weight:800; font-size:1.05rem; line-height:1.25rem; margin:8px 0 6px 0; color:inherit; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
-          .desc {{ margin:0; opacity:.72; font-size:.92rem; min-height:2.4em; }}
-          a.card-link {{ text-decoration:none; color:inherit; display:block; }}
-          a.card-link.disabled {{ pointer-events:none; opacity:.7; }}
-          .state-badge {{ display:inline-block; font-size:.75rem; font-weight:700; border-radius:999px; padding:4px 10px; margin-bottom:8px; }}
-          .state-badge.ok {{ background:#e9f8ef; color:#0f8a43; }}
-          .state-badge.blocked {{ background:#fff1f2; color:#d92d20; }}
-        </style>
-        </head>
-        <body>
-          <div class="zone">
-            <div class="zone-title">대시보드 & 인사이트</div>
-            <div class="scroll-wrap"><div class="row-scroll">{row1_html}</div></div>
-          </div>
-          <div class="zone">
-            <div class="zone-title">데이터 분석 도구</div>
-            <div class="scroll-wrap"><div class="row-scroll">{row2_html}</div></div>
-          </div>
-        </body>
-        </html>
-        """,
-        height=860,
-        scrolling=False,
-    )
+    def render_row(keys, row_label):
+        if not keys:
+            return
+        st.markdown(f"<div style='text-align:center;font-weight:800;opacity:.88;margin:8px 0 14px 0;font-size:1.08rem;'>{row_label}</div>", unsafe_allow_html=True)
+        cols = st.columns(len(keys), gap="medium")
+        for col, key in zip(cols, keys):
+            meta = app_meta(key)
+            can_access = is_admin(user) or (key in allowed)
+            state_badge = "접근 가능" if can_access else "권한 없음"
+            badge_bg = "rgba(16,185,129,.14)" if can_access else "rgba(239,68,68,.12)"
+            badge_color = "#047857" if can_access else "#991b1b"
+            img = str(app_images().get(key) or "")
+            with col:
+                st.markdown("""
+                <style>
+                .portal-card {background:rgba(255,255,255,.94); border:1px solid rgba(0,0,0,.06); border-radius:18px; box-shadow:0 10px 28px rgba(0,0,0,.12); overflow:hidden; min-height: 360px;}
+                .portal-thumb {height:200px; background:#ececec center/cover no-repeat;}
+                .portal-body {padding:16px 18px 18px 18px;}
+                .portal-title {font-size:1.14rem; font-weight:800; margin:10px 0 8px 0; color:#111827;}
+                .portal-desc {font-size:.95rem; line-height:1.45; min-height:44px; color:#4b5563; margin:0;}
+                </style>
+                """, unsafe_allow_html=True)
+                thumb_style = f"background-image:url('{img}');" if img else ""
+                st.markdown(
+                    f"""
+                    <div class="portal-card">
+                      <div class="portal-thumb" style="{thumb_style}"></div>
+                      <div class="portal-body">
+                        <span style="display:inline-block;padding:6px 10px;border-radius:999px;font-size:.78rem;font-weight:700;background:{badge_bg};color:{badge_color};">{state_badge}</span>
+                        <div class="portal-title">{meta['title']}</div>
+                        <p class="portal-desc">{meta['desc']}</p>
+                      </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
+                if not can_access:
+                    st.button("권한 없음", key=f"blocked_{row_label}_{key}", disabled=True, use_container_width=True)
+                elif key in internal_apps:
+                    if st.button("열기", key=f"open_internal_{row_label}_{key}", use_container_width=True):
+                        _go_internal_app(key)
+                elif key in external_apps:
+                    url = str(url_map.get(key) or "").strip()
+                    if url:
+                        st.link_button("새 탭에서 열기", url, use_container_width=True)
+                    else:
+                        st.button("링크 없음", key=f"no_link_{row_label}_{key}", disabled=True, use_container_width=True)
+                else:
+                    url = str(url_map.get(key) or "").strip()
+                    if url:
+                        st.link_button("새 탭에서 열기", url, use_container_width=True)
+                    else:
+                        st.button("준비 중", key=f"coming_{row_label}_{key}", disabled=True, use_container_width=True)
 
-def render_header(user: Optional[Dict[str, Any]]):
-    st.markdown(
-        """
-        <style>
-          .grad-title {
-            font-weight: 900;
-            font-size: clamp(28px, 4vw, 42px);
-            line-height: 1.15;
-            margin: 4px 0 2px 0;
-            background: linear-gradient(90deg, #6757e7 0%, #9B72CB 35%, #ff7bb0 70%, #ff8a4d 100%);
-            -webkit-background-clip: text;
-            background-clip: text;
-            color: transparent;
-            letter-spacing: 0.2px;
-            text-align: center;
-          }
-          .grad-sub { text-align: center; opacity: .72; margin-top: 2px; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown("<div class='grad-title'>드라마 마케팅 대시보드</div>", unsafe_allow_html=True)
-    st.markdown("<div class='grad-sub'>문의: 미디어)마케팅팀 데이터인사이트파트</div>", unsafe_allow_html=True)
-    st.write("")
-
-
-
-
-
-
-def render_restore_splash(message: str = "로그인 상태를 확인하고 있습니다."):
-    st.markdown("### 사이트 접속 중")
-    st.info(message)
-
-
-def render_login_finalize():
-    pending = st.session_state.get("_pending_login_finalize") or {}
-    token = str(pending.get("token") or "")
-    if not token:
-        return False
-    days = int(pending.get("days") or int(AUTH.get("remember_me_days", 3) or 3))
-    stage = int(st.session_state.get("_pending_login_stage", 0) or 0)
-    st.markdown("### 로그인 중")
-    st.info("사이트에 접속하고 있습니다. 잠시만 기다려 주세요.")
-    if stage == 0:
-        inject_browser_session_set(token, days=days)
-        st.session_state["_pending_login_stage"] = 1
-        time.sleep(1.0)
-        st.rerun()
-    st.session_state.pop("_pending_login_finalize", None)
-    st.session_state.pop("_pending_login_stage", None)
-    st.rerun()
-
-def render_login_panel():
-    st.markdown("### 🔐 포털 로그인")
-    with st.form("login_form", clear_on_submit=False):
-        login_id = st.text_input("아이디", placeholder="예: hbkim")
-        password = st.text_input("비밀번호", type="password")
-        remember = st.checkbox("로그인 상태 유지", value=True)
-        submitted = st.form_submit_button("로그인", use_container_width=True)
-    if submitted:
-        ok, user, msg = authenticate_user(login_id.strip(), password)
-        if ok and user:
-            if bool(user.get("must_change_password", False)):
-                st.session_state["reset_target_login_id"] = str(user.get("id"))
-                st.info("관리자 승인이 완료되었습니다. 아래 '새 비밀번호 설정'에서 비밀번호를 다시 설정해 주세요.")
-            else:
-                login_user(user, remember=remember)
-                st.rerun()
-        else:
-            st.error(msg or "로그인에 실패했습니다.")
-
-    with st.expander("비밀번호 재설정 요청", expanded=False):
-        with st.form("pw_reset_request_form", clear_on_submit=True):
-            login_id = st.text_input("아이디 *", key="pw_reset_req_login")
-            name = st.text_input("이름", key="pw_reset_req_name")
-            email = st.text_input("이메일", key="pw_reset_req_email")
-            reason = st.text_area("요청 메모", key="pw_reset_req_reason", height=90, placeholder="예: 비밀번호 분실")
-            submitted = st.form_submit_button("재설정 요청 보내기", use_container_width=True)
-        if submitted:
-            ok, msg = submit_password_reset_request(login_id, name, email, reason)
-            (st.success if ok else st.error)(msg)
-
-    with st.expander("새 비밀번호 설정", expanded=bool(st.session_state.get("reset_target_login_id"))):
-        default_login = st.session_state.get("reset_target_login_id", "")
-        with st.form("pw_reset_complete_form", clear_on_submit=True):
-            login_id = st.text_input("아이디 *", value=default_login, key="pw_reset_complete_login")
-            new_password = st.text_input("새 비밀번호 *", type="password")
-            password_confirm = st.text_input("새 비밀번호 확인 *", type="password")
-            submitted = st.form_submit_button("비밀번호 변경", use_container_width=True)
-        if submitted:
-            ok, msg = complete_password_reset(login_id, new_password, password_confirm)
-            if ok:
-                st.session_state.pop("reset_target_login_id", None)
-            (st.success if ok else st.error)(msg)
-
-
-def render_signup_panel():
-    st.markdown("### 📨 가입 요청")
-    app_keys = [k for k in apps_config().keys() if k != "frontgate"]
-    labels = {k: app_meta(k)["title"] for k in app_keys}
-    with st.form("signup_request_form", clear_on_submit=True):
-        name = st.text_input("이름 *")
-        login_id = st.text_input("희망 아이디 *")
-        password = st.text_input("비밀번호 *", type="password")
-        password_confirm = st.text_input("비밀번호 확인 *", type="password")
-        email = st.text_input("이메일")
-        department = st.text_input("부서")
-        requested_apps = st.multiselect("사용 희망 서비스", app_keys, format_func=lambda x: labels.get(x, x))
-        reason = st.text_area("사용 목적", height=120, placeholder="예: tvN 드라마 성과 모니터링 및 리포트 참고")
-        submitted = st.form_submit_button("접근 요청 보내기", use_container_width=True)
-    if submitted:
-        ok, msg = submit_signup_request(name, login_id, password, password_confirm, email, department, reason, requested_apps)
-        (st.success if ok else st.error)(msg)
+    render_row(row1, "주요 서비스")
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+    render_row(row2, "추가 서비스")
 
 
 
