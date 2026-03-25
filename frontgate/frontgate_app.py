@@ -1109,7 +1109,7 @@ def render_login_finalize():
 def render_login_panel():
     st.markdown("### 🔐 포털 로그인")
     with st.form("login_form", clear_on_submit=False):
-        login_id = st.text_input("아이디", placeholder="예: hbkim")
+        login_id = st.text_input("아이디", placeholder="아이디")
         password = st.text_input("비밀번호", type="password")
         remember = st.checkbox("로그인 상태 유지", value=True)
         submitted = st.form_submit_button("로그인", use_container_width=True)
@@ -1159,10 +1159,10 @@ def render_signup_panel():
         login_id = st.text_input("희망 아이디 *")
         password = st.text_input("비밀번호 *", type="password")
         password_confirm = st.text_input("비밀번호 확인 *", type="password")
+        department = st.text_input("부서 *")
         email = st.text_input("이메일")
-        department = st.text_input("부서")
         requested_apps = st.multiselect("사용 희망 서비스", app_keys, format_func=lambda x: labels.get(x, x))
-        reason = st.text_area("사용 목적", height=120, placeholder="예: tvN 드라마 성과 모니터링 및 리포트 참고")
+        reason = st.text_area("사용 목적", height=120, placeholder=" ")
         submitted = st.form_submit_button("권한 요청 보내기", use_container_width=True)
     if submitted:
         ok, msg = submit_signup_request(name, login_id, password, password_confirm, email, department, reason, requested_apps)
