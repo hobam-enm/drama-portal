@@ -5,6 +5,7 @@ from functools import lru_cache
 
 import pandas as pd
 import os
+import sys
 import re
 import gc
 import time
@@ -41,16 +42,26 @@ BASE_DIR = "/tmp"
 SESS_DIR = os.path.join(BASE_DIR, "sessions")
 os.makedirs(SESS_DIR, exist_ok=True)
 
-CHATBOT_CFG = st.secrets.get("chatbot", {}) or {}
-CHATBOT_GITHUB_CFG = CHATBOT_CFG.get("github", {}) or {}
-GITHUB_TOKEN = str(CHATBOT_GITHUB_CFG.get("token") or st.secrets.get("GITHUB_TOKEN", "") or "")
-GITHUB_REPO = str(CHATBOT_GITHUB_CFG.get("repo") or st.secrets.get("GITHUB_REPO", "") or "")
-GITHUB_BRANCH = str(CHATBOT_GITHUB_CFG.get("branch") or st.secrets.get("GITHUB_BRANCH", "main") or "main")
+_chatbot_secrets = st.secrets.get("chatbot", {}) or {}
+_chatbot_api_keys = _chatbot_secrets.get("api_keys", {}) or {}
+_chatbot_github = _chatbot_secrets.get("github", {}) or {}
+_mongo_secrets = st.secrets.get("mongo", {}) or {}
+
+GITHUB_TOKEN = str(_chatbot_github.get("token") or st.secrets.get("GITHUB_TOKEN", "") or "")
+GITHUB_REPO = str(_chatbot_github.get("repo") or st.secrets.get("GITHUB_REPO", "") or "")
+GITHUB_BRANCH = str(_chatbot_github.get("branch") or st.secrets.get("GITHUB_BRANCH", "main") or "main")
 
 FIRST_TURN_PROMPT_FILE = "1차 질문 프롬프트.md"
 REPO_DIR = os.path.dirname(os.path.abspath(__file__))
 
 from pathlib import Path
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
+
+from frontgate.auth_utils import check_auth
 
 @lru_cache(maxsize=4)
 def load_first_turn_system_prompt() -> str:
@@ -293,19 +304,18 @@ st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 
 # region [Constants & State Management]
 _YT_FALLBACK, _GEM_FALLBACK = [], []
-CHATBOT_API_KEYS = CHATBOT_CFG.get("api_keys", {}) or {}
-YT_API_KEYS = list(CHATBOT_API_KEYS.get("youtube", st.secrets.get("YT_API_KEYS", [])) or _YT_FALLBACK)
-GEMINI_API_KEYS = list(CHATBOT_API_KEYS.get("gemini", st.secrets.get("GEMINI_API_KEYS", [])) or _GEM_FALLBACK)
-GEMINI_MODEL = str(CHATBOT_CFG.get("gemini_model") or "gemini-3-flash-preview")
-GEMINI_TIMEOUT = int(CHATBOT_CFG.get("gemini_timeout") or 240)
-GEMINI_MAX_TOKENS = int(CHATBOT_CFG.get("gemini_max_tokens") or 8192)
-MAX_TOTAL_COMMENTS = int(CHATBOT_CFG.get("max_total_comments") or 120_000)
-MAX_COMMENTS_PER_VID = int(CHATBOT_CFG.get("max_comments_per_vid") or 4_000)
-CACHE_TTL_MINUTES = int(CHATBOT_CFG.get("cache_ttl_minutes") or 20)
+YT_API_KEYS       = list(_chatbot_api_keys.get("youtube", [])) or list(st.secrets.get("YT_API_KEYS", [])) or _YT_FALLBACK
+GEMINI_API_KEYS   = list(_chatbot_api_keys.get("gemini", [])) or list(st.secrets.get("GEMINI_API_KEYS", [])) or _GEM_FALLBACK
+GEMINI_MODEL      = str(_chatbot_secrets.get("gemini_model") or "gemini-3-flash-preview")
+GEMINI_TIMEOUT    = int(_chatbot_secrets.get("gemini_timeout", 240) or 240)
+GEMINI_MAX_TOKENS = int(_chatbot_secrets.get("gemini_max_tokens", 8192) or 8192)
+MAX_TOTAL_COMMENTS   = int(_chatbot_secrets.get("max_total_comments", 120_000) or 120_000)
+MAX_COMMENTS_PER_VID = int(_chatbot_secrets.get("max_comments_per_vid", 4_000) or 4_000)
+CACHE_TTL_MINUTES    = int(_chatbot_secrets.get("cache_ttl_minutes", 20) or 20)
 
 # Gemini 동시 호출 제한
-MAX_GEMINI_INFLIGHT = max(1, int(CHATBOT_CFG.get("max_gemini_inflight") or st.secrets.get("MAX_GEMINI_INFLIGHT", 3) or 3))
-GEMINI_INFLIGHT_WAIT_SEC = int(CHATBOT_CFG.get("gemini_inflight_wait_sec") or st.secrets.get("GEMINI_INFLIGHT_WAIT_SEC", 120) or 120)
+MAX_GEMINI_INFLIGHT = max(1, int(_chatbot_secrets.get("max_gemini_inflight", st.secrets.get("MAX_GEMINI_INFLIGHT", 3)) or 3))
+GEMINI_INFLIGHT_WAIT_SEC = int(_chatbot_secrets.get("gemini_inflight_wait_sec", st.secrets.get("GEMINI_INFLIGHT_WAIT_SEC", 120)) or 120)
 
 _GEMINI_SEM = threading.BoundedSemaphore(MAX_GEMINI_INFLIGHT)
 _GEMINI_TLOCAL = threading.local()
@@ -400,8 +410,8 @@ def get_total_pgc_count():
     client = init_mongo()
     if not client: return 0
     try:
-        db = client.get_database(str((st.secrets.get("mongo", {}) or {}).get("yt_dashboard_db_name") or "yt_dashboard"))
-        col = db.get_collection(str((st.secrets.get("mongo", {}) or {}).get("yt_videos_coll") or "videos"))
+        db = client.get_database(str((_mongo_secrets.get("yt_dashboard_db_name") or "yt_dashboard")))
+        col = db.get_collection(str((_mongo_secrets.get("yt_videos_coll") or "videos")))
         # count_documents({})는 데이터를 로드하지 않고 메타데이터만 확인하므로 매우 빠르고 가볍습니다.
         return col.count_documents({})
     except Exception:
@@ -415,8 +425,8 @@ def search_pgc_data(keywords: list, start_dt: datetime, end_dt: datetime):
     if not client: return []
 
     try:
-        db = client.get_database(str((st.secrets.get("mongo", {}) or {}).get("yt_dashboard_db_name") or "yt_dashboard"))
-        col = db.get_collection(str((st.secrets.get("mongo", {}) or {}).get("yt_videos_coll") or "videos"))
+        db = client.get_database(str((_mongo_secrets.get("yt_dashboard_db_name") or "yt_dashboard")))
+        col = db.get_collection(str((_mongo_secrets.get("yt_videos_coll") or "videos")))
         
         date_query = {}
         if start_dt: date_query["$gte"] = _dt_to_utc_iso_string(start_dt)
@@ -450,8 +460,8 @@ def log_search_history(user_query: str, schema: dict):
         client = init_mongo()
         if not client: return
         
-        db = client.get_database("yt_dashboard")
-        col = db.get_collection("search_logs") # 'search_logs' 컬렉션 자동 생성됨
+        db = client.get_database(str((_mongo_secrets.get("db_name") or "drama_portal")))
+        col = db.get_collection(str((_mongo_secrets.get("search_logs_coll") or "ytcc_search_logs"))) # 검색 로그
         
         user_id = st.session_state.get("auth_user_id") or "public"
         
@@ -799,22 +809,529 @@ def render_pdf_capture_button(label: str, pdf_filename_base: str) -> None:
 # endregion
 
 
-# region [Auth: frontgate handoff]
+# region [Auth: ID/PW in secrets.toml]
+import hmac
+import hashlib
+from typing import Dict, Optional
+
+def _load_auth_users_from_secrets() -> Dict[str, dict]:
+    users = []
+    try:
+        if "users" in st.secrets:
+            users = list(st.secrets.get("users") or [])
+        elif "auth" in st.secrets and isinstance(st.secrets.get("auth"), dict) and "users" in st.secrets["auth"]:
+            users = list(st.secrets["auth"].get("users") or [])
+    except Exception:
+        users = []
+
+    out = {}
+    for u in users:
+        if not isinstance(u, dict):
+            continue
+        uid = (u.get("id") or "").strip()
+        if not uid:
+            continue
+        out[uid] = u
+    return out
+
+def _get_auth_pepper() -> str:
+    try:
+        if "AUTH_PEPPER" in st.secrets:
+            return str(st.secrets.get("AUTH_PEPPER") or "")
+        if "auth" in st.secrets and isinstance(st.secrets.get("auth"), dict):
+            return str(st.secrets["auth"].get("pepper") or "")
+    except Exception:
+        pass
+    return ""
+
+def _pbkdf2_sha256_verify(password: str, encoded: str, pepper: str = "") -> bool:
+    try:
+        parts = encoded.split("$")
+        if len(parts) != 4 or parts[0] != "pbkdf2_sha256":
+            return False
+        iters = int(parts[1])
+        salt = base64.b64decode(parts[2].encode("utf-8"))
+        expect = base64.b64decode(parts[3].encode("utf-8"))
+        dk = hashlib.pbkdf2_hmac("sha256", (password + pepper).encode("utf-8"), salt, iters, dklen=len(expect))
+        return hmac.compare_digest(dk, expect)
+    except Exception:
+        return False
+
+def verify_user_password(user_rec: dict, password: str) -> bool:
+    pepper = _get_auth_pepper()
+    pw_hash = (user_rec.get("pw_hash") or "").strip()
+    if pw_hash.startswith("pbkdf2_sha256$"):
+        return _pbkdf2_sha256_verify(password, pw_hash, pepper=pepper)
+    pw_plain = user_rec.get("pw")
+    if isinstance(pw_plain, str) and pw_plain:
+        return hmac.compare_digest(pw_plain, password)
+    return False
+
+def get_current_user() -> Optional[dict]:
+    uid = st.session_state.get("auth_user_id")
+    users = st.session_state.get("_auth_users_cache") or _load_auth_users_from_secrets()
+    st.session_state["_auth_users_cache"] = users
+    return users.get(uid) if uid else None
+
+def is_authenticated() -> bool:
+    return bool(st.session_state.get("auth_ok") and st.session_state.get("auth_user_id"))
+
+def _qp_get() -> dict:
+    try:
+        return dict(st.query_params)
+    except Exception:
+        return {}
+
+def _qp_set(**kwargs):
+    try:
+        st.query_params.clear()
+        cleaned = {}
+        for k, v in kwargs.items():
+            if v is None: continue
+            if isinstance(v, (list, tuple)):
+                if len(v) == 0: continue
+                cleaned[k] = v[0] 
+            else:
+                s = str(v).strip()
+                if s == "": continue
+                cleaned[k] = s
+        
+        for k, v in cleaned.items():
+            st.query_params[k] = v
+    except Exception:
+        pass
+
+def _b64url_encode(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).decode("utf-8").rstrip("=")
+
+def _b64url_decode(s: str) -> bytes:
+    pad = "=" * (-len(s) % 4)
+    return base64.urlsafe_b64decode((s + pad).encode("utf-8"))
+
+def _auth_signing_secret() -> bytes:
+    pepper = _get_auth_pepper()
+    secret = pepper or str(st.secrets.get("AUTH_SIGNING_SECRET", "") or "") or (GITHUB_TOKEN or "") or "dev-secret"
+    return secret.encode("utf-8")
+
+def _make_auth_token(user_id: str, ttl_hours: int = None) -> str:
+    ttl = ttl_hours if ttl_hours is not None else int(st.secrets.get("AUTH_TOKEN_TTL_HOURS", 24*14) or (24*14))
+    exp = int(time.time() + max(60, ttl * 3600))
+    payload = {"uid": user_id, "exp": exp}
+    raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    body = _b64url_encode(raw)
+    sig = hmac.new(_auth_signing_secret(), body.encode("utf-8"), hashlib.sha256).digest()
+    return f"{body}.{_b64url_encode(sig)}"
+
+def _verify_auth_token(token: str) -> Optional[dict]:
+    try:
+        if not token or "." not in token: return None
+        body, sig = token.split(".", 1)
+        expect = hmac.new(_auth_signing_secret(), body.encode("utf-8"), hashlib.sha256).digest()
+        if not hmac.compare_digest(_b64url_decode(sig), expect): return None
+        payload = json.loads(_b64url_decode(body).decode("utf-8"))
+        if not isinstance(payload, dict): return None
+        if int(payload.get("exp", 0)) < int(time.time()): return None
+        uid = (payload.get("uid") or "").strip()
+        if not uid: return None
+        return payload
+    except Exception:
+        return None
 
 
-from frontgate.auth_utils import check_auth
+# --- MongoDB (URI / PyMongo) based session store (auth only) ---
+def _mongo_uri() -> str:
+    # Support existing secrets layout:
+    #   [mongo]
+    #   uri = "mongodb+srv://..."
+    # and also common flat keys: MONGO_URI / MONGODB_URI
+    try:
+        mongo_block = st.secrets.get("mongo", {}) or {}
+        uri = mongo_block.get("uri", "") or ""
+    except Exception:
+        uri = ""
+    uri = str(uri or st.secrets.get("MONGO_URI", "") or st.secrets.get("MONGODB_URI", "") or "").strip()
+    return uri
+
+def _mongo_enabled() -> bool:
+    return bool(_mongo_uri())
+
+@st.cache_resource
+def _mongo_client():
+    # Keep this isolated to auth; if pymongo isn't installed or connection fails, we gracefully fallback.
+    try:
+        from pymongo import MongoClient  # type: ignore
+        uri = _mongo_uri()
+        if not uri:
+            return None
+        return MongoClient(uri, serverSelectionTimeoutMS=3000, connectTimeoutMS=3000, socketTimeoutMS=3000)
+    except Exception as e:
+        print(f"⚠️ [mongo] client init failed: {e}")
+        return None
+
+def _mongo_db_name() -> str:
+    # Prefer explicit secret, else try to parse default DB from URI path, else fallback to a safe name.
+    try:
+        mongo_block = st.secrets.get("mongo", {}) or {}
+        mongo_db = mongo_block.get("db_name") or mongo_block.get("db") or mongo_block.get("database") or ""
+    except Exception:
+        mongo_db = ""
+    name = str(st.secrets.get("MONGO_DB_NAME", "") or mongo_db or "").strip()
+    if name:
+        return name
+    uri = _mongo_uri()
+    try:
+        if "/" in uri:
+            tail = uri.split("/", 3)[-1]
+            db = tail.split("?", 1)[0].strip()
+            if db and not db.startswith("@") and db not in ("admin",):
+                return db
+    except Exception:
+        pass
+    return "ytcc_auth"
+
+
+def _mongo_saved_sessions_coll_name() -> str:
+    # Separate collection for "saved chat sessions" (qa.json + comments/videos csv blobs).
+    # Keep default stable; allow override via secrets:
+    #   [mongo]
+    #   saved_sessions_coll = "ytcc_saved_sessions"
+    try:
+        mongo_block = st.secrets.get("mongo", {}) or {}
+        name = mongo_block.get("saved_sessions_coll") or mongo_block.get("saved_sessions_collection") or ""
+    except Exception:
+        name = ""
+    name = str(name or "").strip()
+    return name or "ytcc_saved_sessions"
+
+def _mongo_saved_sessions_coll():
+    client = _mongo_client()
+    if client is None:
+        return None
+    db = client[_mongo_db_name()]
+    return db[_mongo_saved_sessions_coll_name()]
+
+def _b64_gzip_bytes(raw: bytes) -> str:
+    if raw is None:
+        return ""
+    gz = gzip.compress(raw, compresslevel=6)
+    return base64.b64encode(gz).decode("ascii")
+
+def _ungzip_b64_to_bytes(s: str) -> bytes:
+    if not s:
+        return b""
+    gz = base64.b64decode(s.encode("ascii"))
+    return gzip.decompress(gz)
+
+
+def _mongo_sessions_coll_name() -> str:
+    try:
+        mongo_block = st.secrets.get("mongo", {}) or {}
+        coll = mongo_block.get("sessions_coll") or mongo_block.get("sessions_collection") or mongo_block.get("coll") or ""
+    except Exception:
+        coll = ""
+    return str(st.secrets.get("MONGO_SESSIONS_COLL", "") or coll or "sessions").strip() or "sessions"
+
+def _mongo_sessions_coll():
+    try:
+        cli = _mongo_client()
+        if cli is None:
+            return None
+        db = cli[_mongo_db_name()]
+        coll = db[_mongo_sessions_coll_name()]
+        # Best-effort TTL index (optional). Store expiresAt as datetime.
+        try:
+            from pymongo import ASCENDING  # type: ignore
+            coll.create_index([("expiresAt", ASCENDING)], expireAfterSeconds=0)
+            coll.create_index([("uid", ASCENDING)])
+        except Exception:
+            pass
+        return coll
+    except Exception as e:
+        print(f"⚠️ [mongo] coll init failed: {e}")
+        return None
+
+def _make_session_id() -> str:
+    return base64.urlsafe_b64encode(os.urandom(24)).decode("utf-8").rstrip("=")
+
+def _create_mongo_session(uid: str, ttl_hours: int = None) -> Optional[str]:
+    try:
+        coll = _mongo_sessions_coll()
+        if coll is None:
+            return None
+        ttl = ttl_hours if ttl_hours is not None else int(st.secrets.get("AUTH_TOKEN_TTL_HOURS", 24*14) or (24*14))
+        exp = int(time.time() + max(60, ttl * 3600))
+        sid = _make_session_id()
+        now = datetime.utcnow()
+        coll.insert_one({
+            "_id": sid,
+            "uid": uid,
+            "exp": exp,
+            "expiresAt": datetime.utcfromtimestamp(exp),
+            "revoked": False,
+            "createdAt": now,
+            "lastSeenAt": now,
+        })
+        return sid
+    except Exception as e:
+        print(f"⚠️ [mongo] create session failed: {e}")
+        return None
+
+def _verify_mongo_session(sid: str) -> Optional[dict]:
+    try:
+        if not sid or "." in sid:
+            return None
+        coll = _mongo_sessions_coll()
+        if coll is None:
+            return None
+        doc = coll.find_one({"_id": sid, "revoked": {"$ne": True}})
+        if not doc:
+            return None
+        exp = int(doc.get("exp") or 0)
+        if exp < int(time.time()):
+            return None
+        uid = str(doc.get("uid") or "").strip()
+        if not uid:
+            return None
+        try:
+            coll.update_one({"_id": sid}, {"$set": {"lastSeenAt": datetime.utcnow()}})
+        except Exception:
+            pass
+        return {"uid": uid, "exp": exp, "sid": sid}
+    except Exception as e:
+        print(f"⚠️ [mongo] verify session failed: {e}")
+        return None
+
+def _revoke_mongo_session(sid: str) -> None:
+    try:
+        if not sid or "." in sid:
+            return
+        coll = _mongo_sessions_coll()
+        if coll is None:
+            return
+        coll.update_one({"_id": sid}, {"$set": {"revoked": True, "revokedAt": datetime.utcnow()}})
+    except Exception as e:
+        print(f"⚠️ [mongo] revoke session failed: {e}")
+
+def _redirect_with_auth(auth_value: str):
+    """Ensure the browser URL includes ?auth=... .
+
+    1) Prefer Streamlit-native query param update + rerun (no iframe / no JS sandbox).
+    2) Fallback to a tiny JS redirect that targets the *parent* window, with a visible
+       manual link as a backup (so we never show a blank white screen).
+    """
+    auth_value = str(auth_value or "").strip()
+    if not auth_value:
+        return
+
+    # 1) Native (most reliable on Streamlit Cloud)
+    try:
+        st.query_params["auth"] = auth_value
+        if "logout" in st.query_params:
+            del st.query_params["logout"]
+        st.rerun()
+    except Exception as e:
+        print(f"⚠️ [_redirect_with_auth] st.query_params failed: {e}")
+
+    # 2) JS fallback (must target parent window; component iframe's window.location won't change address bar)
+    try:
+        from urllib.parse import quote as _q
+        safe_link = "?auth=" + _q(auth_value, safe="")
+    except Exception:
+        safe_link = "?auth=" + auth_value
+
+    st.info("로그인 처리 중입니다… 자동 이동이 안 되면 아래 '계속'을 눌러주세요.")
+    st.markdown(f"<div style='text-align:center; margin-top:0.5rem;'><a href='{safe_link}' style='font-weight:700;'>계속</a></div>", unsafe_allow_html=True)
+
+    safe_val = json.dumps(auth_value)
+    st_html(
+        f"""
+        <script>
+          (function () {{
+            try {{
+              var target = (window.parent && window.parent !== window) ? window.parent : window;
+              var url = new URL(target.location.href);
+              url.searchParams.set("auth", {safe_val});
+              url.searchParams.delete("logout");
+              target.location.replace(url.toString());
+            }} catch (e) {{
+              try {{
+                var target2 = (window.parent && window.parent !== window) ? window.parent : window;
+                var base = target2.location.href.split("?")[0];
+                target2.location.replace(base + "?auth=" + encodeURIComponent({safe_val}));
+              }} catch (e2) {{}}
+            }}
+          }})();
+        </script>
+        """,
+        height=0
+    )
+    st.stop()
+
+
+# --- Browser localStorage helpers (team-tool login persistence) ---
+_AUTH_LS_KEY = str(st.secrets.get("AUTH_LS_KEY", "") or "ytcc_auth_token").strip() or "ytcc_auth_token"
+
+def _ls_get_item(key: str):
+    if not _SJE_AVAILABLE:
+        return None
+    try:
+        v = streamlit_js_eval(
+            js_expressions=f"localStorage.getItem({json.dumps(key)})",
+            key=f"ls_get::{key}",
+            want_output=True
+        )
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return v
+        return str(v)
+    except Exception as e:
+        print(f"⚠️ [localStorage] get failed: {e}")
+        return None
+
+def _ls_set_item(key: str, value: str):
+    if not _SJE_AVAILABLE:
+        return
+    try:
+        _k = f"ls_set::{key}::{int(time.time()*1000)}"
+        streamlit_js_eval(
+            js_expressions=f"localStorage.setItem({json.dumps(key)}, {json.dumps(str(value))});",
+            key=_k,
+            want_output=False
+        )
+    except Exception as e:
+        print(f"⚠️ [localStorage] set failed: {e}")
+
+def _ls_del_item(key: str):
+    if not _SJE_AVAILABLE:
+        return
+    try:
+        _k = f"ls_del::{key}::{int(time.time()*1000)}"
+        streamlit_js_eval(
+            js_expressions=f"localStorage.removeItem({json.dumps(key)});",
+            key=_k,
+            want_output=False
+        )
+    except Exception as e:
+        print(f"⚠️ [localStorage] del failed: {e}")
+
+def _get_persisted_token(qp: dict) -> str:
+    # Priority: URL qp auth (if present) > session_state cached token > localStorage
+    tok = ""
+    try:
+        if isinstance(qp, dict) and "auth" in qp:
+            v = qp.get("auth")
+            if isinstance(v, list):
+                v = v[0] if v else ""
+            tok = str(v or "").strip()
+    except Exception:
+        pass
+    if not tok:
+        tok = str(st.session_state.get("_auth_token") or "").strip()
+    if not tok:
+        tok = str(_ls_get_item(_AUTH_LS_KEY) or "").strip()
+    return tok
+
+def _logout_and_clear():
+    """
+    Robust logout for team-tool mode (MongoDB session + localStorage persistence)
+
+    Goals:
+      1) Revoke current MongoDB session immediately (best-effort)
+      2) Delete browser localStorage token so refresh won't auto-login
+      3) Clear Streamlit session auth state
+      4) Navigate to a clean URL (no query params) without blank/white screen
+    """
+    # ---- 0) Identify current token (prefer in-memory, then URL, then localStorage) ----
+    tok = str(st.session_state.get("_auth_token") or "").strip()
+    if not tok:
+        try:
+            qp = _qp_get()
+            v = qp.get("auth") if isinstance(qp, dict) else ""
+            if isinstance(v, list):
+                v = v[0] if v else ""
+            tok = str(v or "").strip()
+        except Exception:
+            tok = ""
+    if not tok:
+        try:
+            tok = str(_ls_get_item(_AUTH_LS_KEY) or "").strip()
+        except Exception:
+            tok = ""
+
+    # ---- 1) Revoke mongo session (opaque token without '.') ----
+    try:
+        if tok and "." not in tok:
+            _revoke_mongo_session(tok)
+    except Exception as e:
+        print(f"⚠️ [logout] revoke session failed: {e}")
+
+    # ---- 2) Delete localStorage token (best-effort) ----
+    try:
+        _ls_del_item(_AUTH_LS_KEY)
+    except Exception as e:
+        print(f"⚠️ [logout] localStorage delete failed: {e}")
+
+    # ---- 3) Clear auth-related session_state keys ----
+    for k in [
+        "auth_ok",
+        "auth_user_id",
+        "auth_role",
+        "auth_display_name",
+        "_auth_token",
+    ]:
+        try:
+            st.session_state.pop(k, None)
+        except Exception:
+            pass
+
+    # Keep other session data reset behavior (existing logic)
+    _reset_chat_only(keep_auth=False)
+
+    # ---- 4) Clear query params (best-effort) ----
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
+
+    # ---- 5) User-visible logout feedback + hard clean URL navigation ----
+    st.markdown("✅ 로그아웃 처리 중…")
+
+    # JS fallback: remove localStorage + navigate to clean URL (parent if framed)
+    # Using replace() avoids creating history entries.
+    st_html(
+        f"""
+        <script>
+          (function () {{
+            try {{
+              var w = window.parent || window;
+              try {{ w.localStorage.removeItem({json.dumps(_AUTH_LS_KEY)}); }} catch(e) {{}}
+              var clean = w.location.pathname + (w.location.hash || "");
+              w.location.replace(clean);
+            }} catch (e) {{
+              // If navigation is blocked for any reason, do nothing; Streamlit rerun will show login screen.
+            }}
+          }})();
+        </script>
+        """,
+        height=0
+    )
+
+    # Don't leave a blank white page; stop after rendering the message above.
+    st.stop()
+
 
 def require_auth():
     current_user = check_auth("chatbot")
-    user_id = str(current_user.get("id") or current_user.get("sub") or "")
-    display_name = str(current_user.get("name") or user_id)
+    uid = str(current_user.get("user_id") or current_user.get("username") or "")
     role = str(current_user.get("role") or "user")
+    display_name = str(current_user.get("display_name") or uid)
 
-    st.session_state["current_user"] = current_user
     st.session_state["auth_ok"] = True
-    st.session_state["auth_user_id"] = user_id
+    st.session_state["auth_user_id"] = uid
     st.session_state["auth_role"] = role
     st.session_state["auth_display_name"] = display_name
+    st.session_state["client_instance_id"] = st.session_state.get("client_instance_id") or uuid4().hex[:10]
     return current_user
 # endregion
 
@@ -1984,18 +2501,16 @@ with st.sidebar:
             """, unsafe_allow_html=True)
             
         with c_logout:
-            frontgate_url = (st.secrets.get("apps", {}) or {}).get("frontgate", "")
-            if frontgate_url:
-                st.markdown(
-                    f"""
-                    <a href="{frontgate_url}" target="_self" 
-                       style="float:right; color:#6b7280; font-size:0.75rem; text-decoration:underline; 
-                              font-weight:500; cursor:pointer; margin-top:4px;">
-                       포털로
-                    </a>
-                    """,
-                    unsafe_allow_html=True
-                )
+            st.markdown(
+                """
+                <a href="{str((st.secrets.get("apps", {}) or {}).get("frontgate") or "/")}" target="_self" 
+                   style="float:right; color:#6b7280; font-size:0.75rem; text-decoration:underline; 
+                          font-weight:500; cursor:pointer; margin-top:4px;">
+                   포털로
+                </a>
+                """, 
+                unsafe_allow_html=True
+            )
             
         st.markdown('<div style="border-bottom:1px solid #efefef; margin-bottom:12px; margin-top:2px;"></div>', unsafe_allow_html=True)
 
