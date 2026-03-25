@@ -865,8 +865,9 @@ APP_META_DEFAULTS = {
     "data_dashboard": {"title": "📊 데이터 대시보드", "desc": "드라마 성과데이터 한눈에 비교"},
     "ip_briefing": {"title": "📝 IP 브리핑", "desc": "IP별 상세 성과 브리핑"},
     "insightlab": {"title": "🔬 인사이트랩", "desc": "월간 리포트 및 분석 자료"},
-    "yt_datacrawler": {"title": "🔭 유튜브 PGC 트래커", "desc": "유튜브 채널/영상 통계 트래킹"},
     "chatbot": {"title": "💬 댓글 분석 챗봇", "desc": "유튜브 댓글 기반 AI 분석"},
+    "yt_datacrawler": {"title": "🔭 유튜브 PGC 트래커", "desc": "유튜브 채널/영상 통계 트래킹"},
+
 }
 
 
