@@ -1323,9 +1323,25 @@ def _logout_and_clear():
 
 def require_auth():
     current_user = check_auth("chatbot")
-    uid = str(current_user.get("user_id") or current_user.get("username") or "")
-    role = str(current_user.get("role") or "user")
-    display_name = str(current_user.get("display_name") or uid)
+
+    uid = str(
+        current_user.get("id")
+        or current_user.get("user_id")
+        or current_user.get("username")
+        or current_user.get("sub")
+        or ""
+    ).strip()
+    role = str(current_user.get("role") or "user").strip() or "user"
+    display_name = str(
+        current_user.get("name")
+        or current_user.get("display_name")
+        or current_user.get("username")
+        or uid
+    ).strip() or uid
+
+    if not uid:
+        st.error("인증 사용자 식별값을 찾지 못했습니다. frontgate user payload를 확인해주세요.")
+        st.stop()
 
     st.session_state["auth_ok"] = True
     st.session_state["auth_user_id"] = uid
@@ -2488,7 +2504,7 @@ with st.sidebar:
     st.markdown('<div style="height: 20px;"></div>', unsafe_allow_html=True)
 
     if st.session_state.get("auth_user_id"):
-        disp = st.session_state.get("auth_display_name", st.session_state.get("auth_user_id"))
+        disp = st.session_state.get("auth_user_id") or st.session_state.get("auth_display_name", "")
         role = st.session_state.get("auth_role", "user")
         
         c_user, c_logout = st.columns([0.75, 0.25], gap="small")
@@ -2501,11 +2517,12 @@ with st.sidebar:
             """, unsafe_allow_html=True)
             
         with c_logout:
+            frontgate_url = str((st.secrets.get("apps", {}) or {}).get("frontgate") or "/")
             st.markdown(
-                """
-                <a href="{str((st.secrets.get("apps", {}) or {}).get("frontgate") or "/")}" target="_self" 
-                   style="float:right; color:#6b7280; font-size:0.75rem; text-decoration:underline; 
-                          font-weight:500; cursor:pointer; margin-top:4px;">
+                f"""
+                <a href=\"{frontgate_url}\" target=\"_self\" 
+                   style=\"float:right; color:#6b7280; font-size:0.75rem; text-decoration:underline; 
+                          font-weight:500; cursor:pointer; margin-top:4px;\">
                    포털로
                 </a>
                 """, 
