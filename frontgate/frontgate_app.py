@@ -40,7 +40,7 @@ UTC = timezone.utc
 # =========================================================
 # page
 # =========================================================
-st.set_page_config(page_title="드라마 데이터 포털", page_icon="🧭", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="드라마 마케팅 대시보드", page_icon="🧭", layout="wide", initial_sidebar_state="collapsed")
 
 
 # =========================================================
@@ -1022,7 +1022,7 @@ def render_header(user: Optional[Dict[str, Any]]):
         """,
         unsafe_allow_html=True,
     )
-    st.markdown("<div class='grad-title'>드라마 데이터 포털</div>", unsafe_allow_html=True)
+    st.markdown("<div class='grad-title'>드라마 마케팅 대시보드</div>", unsafe_allow_html=True)
     st.markdown("<div class='grad-sub'>문의: 미디어)마케팅팀 데이터인사이트파트</div>", unsafe_allow_html=True)
     st.write("")
 
@@ -1321,4 +1321,4 @@ if st.button("로그아웃", use_container_width=True):
     logout_user()
 
 st.markdown("<hr style='margin-top:30px; opacity:.2;'>", unsafe_allow_html=True)
-st.markdown("<p style='text-align:center; opacity:.65;'>© 드라마 데이터 포털</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center; opacity:.65;'>© 드라마 마케팅 대시보드</p>", unsafe_allow_html=True)
