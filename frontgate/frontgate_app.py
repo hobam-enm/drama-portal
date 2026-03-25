@@ -862,11 +862,11 @@ def update_user_access(user_id: str, allowed_apps: List[str], role: Optional[str
 # =========================================================
 APP_META_DEFAULTS = {
     "frontgate": {"title": "🧭 드라마 포털", "desc": "통합 진입 포털"},
-    "data_dashboard": {"title": "📊 데이터 대시보드", "desc": "드라마 성과데이터 한눈에 비교"},
-    "ip_briefing": {"title": "📝 IP 브리핑", "desc": "IP별 상세 성과 브리핑"},
-    "insightlab": {"title": "🔬 인사이트랩", "desc": "월간 리포트 및 분석 자료"},
-    "chatbot": {"title": "💬 댓글 분석 챗봇", "desc": "유튜브 댓글 기반 AI 분석"},
-    "yt_datacrawler": {"title": "🔭 유튜브 PGC 트래커", "desc": "유튜브 채널/영상 통계 트래킹"},
+    "data_dashboard": {"title": "📊 데이터 대시보드", "desc": "드라마 성과데이터 한눈에 비교하기"},
+    "ip_briefing": {"title": "📝 주간 IP시청자 브리핑", "desc": "IP별 주간 시청자반응 브리핑"},
+    "insightlab": {"title": "🔬 드라마 인사이트랩", "desc": "드라마 관련 다양한 인사이트 보고서"},
+    "chatbot": {"title": "💬 유튜브 댓글 분석 AI챗봇", "desc": "드라마 유튜브 반응 AI분석/심층대화"},
+    "yt_datacrawler": {"title": "🔭 유튜브 데이터 트래커", "desc": "PGC영상의 상세통계 확인하기"},
 
 }
 
