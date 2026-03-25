@@ -379,7 +379,29 @@ def _restore_from_browser() -> Optional[Dict[str, Any]]:
     return None
 
 
+def _render_child_login_finalize() -> bool:
+    pending = st.session_state.get("_child_pending_login_finalize") or {}
+    token = str(pending.get("token") or "")
+    if not token:
+        return False
+    days = int(pending.get("days") or int(AUTH.get("remember_me_days", 3) or 3))
+    stage = int(st.session_state.get("_child_pending_login_stage", 0) or 0)
+    st.info("로그인 상태를 복구하는 중입니다...")
+    if stage == 0:
+        set_cookie(COOKIE_NAME, token, days=days)
+        inject_browser_session_set(token, days=days)
+        st.session_state["_child_pending_login_stage"] = 1
+        st.rerun()
+    st.session_state.pop("_child_pending_login_finalize", None)
+    st.session_state.pop("_child_pending_login_stage", None)
+    st.session_state["_child_ls_synced"] = token
+    st.rerun()
+
+
 def check_auth(app_name: str) -> Dict[str, Any]:
+    if _render_child_login_finalize():
+        st.stop()
+
     # 1) in-memory session
     if "current_user" in st.session_state:
         user_payload = st.session_state["current_user"]
@@ -415,9 +437,11 @@ def check_auth(app_name: str) -> Dict[str, Any]:
             if mongo_available():
                 session_token = create_session_from_payload(payload, source_app=app_name)
                 if session_token:
-                    set_cookie(COOKIE_NAME, session_token, days=int(AUTH.get("remember_me_days", 3)))
-                    inject_browser_session_set(session_token, days=int(AUTH.get("remember_me_days", 3)))
-                    st.session_state["_child_ls_synced"] = session_token
+                    st.session_state["_child_pending_login_finalize"] = {
+                        "token": session_token,
+                        "days": int(AUTH.get("remember_me_days", 3)),
+                    }
+                    st.session_state["_child_pending_login_stage"] = 0
 
             user_payload = {
                 "id": str(payload.get("sub") or ""),
