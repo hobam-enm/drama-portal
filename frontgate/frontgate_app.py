@@ -487,6 +487,10 @@ def validate_session(raw_token: str) -> Optional[Dict[str, Any]]:
 
 
 def issue_handoff_token(user: Dict[str, Any], target_app: str) -> str:
+    session_token = str(user.get("session_token") or "")
+    remember_days = int(AUTH.get("remember_me_days", 3) or 3)
+    ttl_hours = int(AUTH.get("session_ttl_hours", 12) or 12)
+    expires_at = utcnow() + (timedelta(days=remember_days) if session_token else timedelta(hours=ttl_hours))
     payload = {
         "sub": str(user.get("id")),
         "name": str(user.get("name") or user.get("id")),
@@ -494,8 +498,9 @@ def issue_handoff_token(user: Dict[str, Any], target_app: str) -> str:
         "perms": list(user.get("permissions") or []),
         "apps": list(user.get("allowed_apps") or []),
         "app": target_app,
+        "st": session_token,
         "iat": int(utcnow().timestamp()),
-        "exp": int((utcnow() + timedelta(minutes=10)).timestamp()),
+        "exp": int(expires_at.timestamp()),
     }
     return sign_payload(payload)
 
