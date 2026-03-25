@@ -949,7 +949,7 @@ def build_cards_html(user: Dict[str, Any], keys: List[str]) -> str:
 def render_card_rows(user: Dict[str, Any]):
     all_keys = [k for k in apps_config().keys() if k != "frontgate"]
     row1 = [k for k in ["data_dashboard", "ip_briefing", "insightlab"] if k in all_keys]
-    row2 = [k for k in ["yt_datacrawler", "chatbot"] if k in all_keys]
+    row2 = [k for k in [ "chatbot", "yt_datacrawler"] if k in all_keys]
     rest = [k for k in all_keys if k not in row1 + row2]
     if rest:
         row2.extend(rest)
