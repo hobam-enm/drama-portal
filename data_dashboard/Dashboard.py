@@ -20,6 +20,9 @@ import gspread
 from google.oauth2.service_account import Credentials
 import extra_streamlit_components as stx
 from plotly import graph_objects as go
+import sys
+import os
+
 #endregion
 
 
@@ -35,73 +38,28 @@ st.set_page_config(
 # =====================================================
 #endregion
 #region [ 3. 인증/쿠키 게이트 ]
+
+# ===== 1. 통합 포털 경로 추가 =====
+# 현재 파일(Dashboard.py) 위치를 기준으로 상위 폴더(레포지토리 루트)를 파이썬 경로에 추가합니다.
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
+
+
+# ===== 2. 통합 포털 인증 게이트 =====
+# 이제 파이썬이 상위 폴더에 있는 frontgate 모듈을 정상적으로 찾을 수 있습니다.
+from frontgate.auth_utils import check_auth
+
+current_user = check_auth("data_dashboard")
+
 def _rerun():
     if hasattr(st, "rerun"):
         st.rerun()
     else:
         st.experimental_rerun()
 
-# 쿠키 이름 및 유효기간 설정
-COOKIE_NAME = "dmb_auth_token"
-COOKIE_EXPIRY_DAYS = 1
 
-def get_cookie_manager():
-    return stx.CookieManager(key="dmb_cookie_manager")
-
-def _hash_password(password: str) -> str:
-    return hashlib.sha256(str(password).encode()).hexdigest()
-
-def check_password_with_cookie() -> bool:
-    cookie_manager = get_cookie_manager()
-    
-    # 1. Streamlit Secrets 확인
-    secret_pwd = st.secrets.get("DASHBOARD_PASSWORD")
-    if not secret_pwd:
-        st.error("설정 파일(.streamlit/secrets.toml)에 'DASHBOARD_PASSWORD'가 없습니다.")
-        st.stop()
-        
-    hashed_secret = _hash_password(str(secret_pwd))
-    
-    # 2. 쿠키 읽기
-    cookies = cookie_manager.get_all()
-    current_token = cookies.get(COOKIE_NAME)
-    
-    # 쿠키가 있거나, 방금 로그인을 성공해서 세션에 기록이 남아있다면 통과
-    is_cookie_valid = (current_token == hashed_secret)
-    is_session_valid = st.session_state.get("auth_success", False)
-    
-    if is_cookie_valid or is_session_valid:
-        # 쿠키가 유효하면 세션도 True로 갱신 (새로고침 대비)
-        if is_cookie_valid:
-            st.session_state["auth_success"] = True
-        return True
-
-    # 4. 로그인 UI
-    with st.sidebar:
-        st.markdown("## 🔐 로그인")
-        input_pwd = st.text_input("비밀번호를 입력하세요", type="password", key="__login_pwd__")
-        login_btn = st.button("로그인")
-
-    # 5. 로그인 처리
-    if login_btn:
-        if _hash_password(input_pwd) == hashed_secret:
-            # A. 쿠키 굽기 (브라우저 저장용)
-            expires = datetime.datetime.now() + datetime.timedelta(days=COOKIE_EXPIRY_DAYS)
-            cookie_manager.set(COOKIE_NAME, hashed_secret, expires_at=expires)
-            
-            # B. [핵심] 세션에 '로그인 성공' 도장 찍기 (쿠키 딜레이 방어용)
-            st.session_state["auth_success"] = True
-            
-            st.success("로그인 성공! 잠시 후 이동합니다.")
-            time.sleep(1.5) # 딜레이를 약간 늘림 (안정성 확보)
-            _rerun()
-        else:
-            st.sidebar.warning("비밀번호가 일치하지 않습니다.")
-            
-    return False
-
-if not check_password_with_cookie():
-    st.stop()
 
 
 # =====================================================
@@ -439,13 +397,13 @@ def load_data() -> pd.DataFrame:
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
     
     try:
-        creds_info = st.secrets["gcp_service_account"]
+        creds_info = st.secrets["google"]["service_account"]
         creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
         client = gspread.authorize(creds)
 
         # --- 2. 데이터 로드 ---
-        sheet_id = st.secrets["SHEET_ID"]
-        worksheet_name = st.secrets["SHEET_NAME"] 
+        sheet_id = st.secrets["data_dashboard"]["sheet_id"]
+        worksheet_name = st.secrets["data_dashboard"]["sheet_name"]
         
         spreadsheet = client.open_by_key(sheet_id)
         worksheet = spreadsheet.worksheet(worksheet_name)
