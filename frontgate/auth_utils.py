@@ -49,7 +49,7 @@ def get_auth_cfg() -> Dict[str, Any]:
     cfg.setdefault("cookie_name", "drama_portal_session")
     cfg.setdefault("admin_role_name", "admin")
     cfg.setdefault("default_role", "user")
-    cfg.setdefault("debug_auth", True)
+    cfg.setdefault("debug_auth", False)
     return cfg
 
 
@@ -73,12 +73,7 @@ SIGNING_SECRET = str(AUTH.get("signing_secret") or "")
 # debug helpers
 # =========================
 def _debug_enabled() -> bool:
-    try:
-        qp = st.query_params
-        qp_flag = str(qp.get("authdebug", "")).lower() in ("1", "true", "yes", "y")
-    except Exception:
-        qp_flag = False
-    return bool(AUTH.get("debug_auth", False) or qp_flag)
+    return False
 
 
 def _mask(value: Any, keep: int = 6) -> str:
@@ -91,37 +86,11 @@ def _mask(value: Any, keep: int = 6) -> str:
 
 
 def _debug(msg: str, **data):
-    if not _debug_enabled():
-        return
-    logs = st.session_state.setdefault("_auth_debug_logs", [])
-    ts = datetime.now(KST).strftime("%H:%M:%S.%f")[:-3]
-    if data:
-        safe = {k: (_mask(v) if any(x in k.lower() for x in ["token", "secret", "sig", "cookie"]) else v) for k, v in data.items()}
-        logs.append(f"[{ts}] {msg} | {json.dumps(safe, ensure_ascii=False, default=str)}")
-    else:
-        logs.append(f"[{ts}] {msg}")
+    return
 
 
 def render_auth_debug_panel():
-    if not _debug_enabled():
-        return
-    with st.expander("Auth debug", expanded=True):
-        st.write({
-            "cookie_manager": stx is not None,
-            "js_eval": streamlit_js_eval is not None,
-            "mongo_uri_set": bool(MONGO.get("uri")),
-            "db_name": MONGO.get("db_name"),
-            "cookie_name": COOKIE_NAME,
-            "local_storage_key": LOCAL_STORAGE_KEY,
-            "signing_secret_set": bool(SIGNING_SECRET),
-            "session_keys": sorted(list(st.session_state.keys())),
-            "query_params": dict(st.query_params),
-        })
-        logs = st.session_state.get("_auth_debug_logs", [])
-        if logs:
-            st.code("\n".join(logs[-80:]), language="text")
-        else:
-            st.caption("No auth logs yet")
+    return
 
 
 def utcnow() -> datetime:
