@@ -1156,13 +1156,13 @@ def render_signup_panel():
     labels = {k: app_meta(k)["title"] for k in app_keys}
     with st.form("signup_request_form", clear_on_submit=True):
         name = st.text_input("이름 *")
-        login_id = st.text_input("희망 아이디 *")
+        login_id = st.text_input("희망 아이디 *", placeholder="한글아이디 가능")
         password = st.text_input("비밀번호 *", type="password")
         password_confirm = st.text_input("비밀번호 확인 *", type="password")
-        department = st.text_input("부서 *")
-        email = st.text_input("이메일")
+        department = st.text_input("부서 *", placeholder="미디어)마케팅팀")
+        email = st.text_input("이메일", placeholder="aaa@cj.net")
         requested_apps = st.multiselect("사용 희망 서비스", app_keys, format_func=lambda x: labels.get(x, x))
-        reason = st.text_area("사용 목적", height=120, placeholder=" ")
+        reason = st.text_area("사용 목적", height=120, placeholder="생략 가능")
         submitted = st.form_submit_button("권한 요청 보내기", use_container_width=True)
     if submitted:
         ok, msg = submit_signup_request(name, login_id, password, password_confirm, email, department, reason, requested_apps)
