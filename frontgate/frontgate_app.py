@@ -917,7 +917,13 @@ def build_cards_html(user: Dict[str, Any], keys: List[str]) -> str:
         img = str(img_map.get(key) or "https://images.unsplash.com/photo-1507842217343-583bb7270b66")
 
         can_access = is_admin(user) or (key in allowed)
-        final_url = with_query_param(url, "auth", issue_handoff_token(user, key)) if can_access and SIGNING_SECRET else url
+        public_apps = {"ip_briefing", "insightlab"}
+        needs_auth_handoff = key not in public_apps
+        final_url = (
+            with_query_param(url, "auth", issue_handoff_token(user, key))
+            if can_access and SIGNING_SECRET and needs_auth_handoff
+            else url
+        )
         state_badge = "접근 가능" if can_access else "권한 없음"
         badge_class = "ok" if can_access else "blocked"
         href = final_url if can_access else "#"
