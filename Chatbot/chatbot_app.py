@@ -801,10 +801,6 @@ def render_pdf_capture_button(label: str, pdf_filename_base: str) -> None:
 
 # region [Auth: frontgate handoff]
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-if parent_dir not in sys.path:
-    sys.path.append(parent_dir)
 
 from frontgate.auth_utils import check_auth
 
