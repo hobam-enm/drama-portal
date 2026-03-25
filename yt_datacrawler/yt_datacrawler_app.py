@@ -64,20 +64,36 @@ is_admin = current_role == admin_role_name
 
 
 def _restore_token_files_from_secrets() -> None:
-    tokens_map = {}
-    yt_section = st.secrets.get("yt_datacrawler", {})
-    if isinstance(yt_section, dict) and isinstance(yt_section.get("tokens"), dict):
-        tokens_map = dict(yt_section.get("tokens", {}))
-    elif isinstance(st.secrets.get("tokens"), dict):
-        tokens_map = dict(st.secrets.get("tokens", {}))
+    tokens_map = None
 
-    for file_name, content in tokens_map.items():
+    # 1) 통합 TOML 구조 우선: [yt_datacrawler.tokens]
+    try:
+        yt_section = st.secrets["yt_datacrawler"]
+        if "tokens" in yt_section:
+            tokens_map = yt_section["tokens"]
+    except Exception:
+        tokens_map = None
+
+    # 2) 구버전 fallback: [tokens]
+    if not tokens_map:
+        try:
+            if "tokens" in st.secrets:
+                tokens_map = st.secrets["tokens"]
+        except Exception:
+            tokens_map = None
+
+    # 3) 실제 token_*.json 파일로 복원
+    if not tokens_map:
+        return
+
+    for file_name in tokens_map.keys():
+        content = tokens_map[file_name]
         target_name = str(file_name)
         if not target_name.endswith(".json"):
             target_name += ".json"
-        if not os.path.exists(target_name):
-            with open(target_name, "w", encoding="utf-8") as f:
-                f.write(str(content))
+
+        with open(target_name, "w", encoding="utf-8") as f:
+            f.write(str(content).strip())
 
 
 _restore_token_files_from_secrets()
@@ -930,8 +946,6 @@ with st.expander("🔌 연결된 채널 리스트 / 연결 상태 보기", expan
         st.dataframe(df_conn, use_container_width=True, hide_index=True)
     else:
         st.info("확인 가능한 token_*.json 파일이 없습니다.")
-        st.caption("현재 코드만으로는 '연결되어야 할 전체 채널 마스터 목록'이 없어서, 존재하지 않는 채널까지 미연결로 자동 표기하진 못합니다.")
-
 
 with st.sidebar:
     st.header("🎛️ 데이터 관리")
@@ -958,7 +972,6 @@ with st.sidebar:
                 st.caption(f"연결됨 {connected_cnt}개 / 미연결 {disconnected_cnt}개")
             else:
                 st.warning("token_*.json 파일이 없어 연결 상태를 확인할 채널이 없습니다.")
-                st.caption("※ 현재 구조상 '예상 채널 목록'이 없으면, 파일이 아예 없는 채널까지 자동 식별할 수는 없습니다.")
 
         if token_files:
             last_ts = get_last_update_time(f"cache_{os.path.basename(token_files[0])}")
