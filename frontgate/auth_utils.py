@@ -456,6 +456,8 @@ def check_auth(app_name: str) -> Dict[str, Any]:
             }
             st.session_state["current_user"] = user_payload
             _remove_query_param("auth")
+            if session_token:
+                st.rerun()
             return user_payload
 
     # 4) deny
