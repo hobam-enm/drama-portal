@@ -2648,38 +2648,36 @@ if not st.session_state.chat:
 """, unsafe_allow_html=True)
 
     # ===== 검색 및 데이터 모드 설정 토글 UI =====
-    left_spacer, center_area, right_spacer = st.columns([1, 2.4, 1])
+    _, col_toggle1, col_toggle2, _ = st.columns([1.2, 1.5, 1.5, 1.2])
+    
+    with col_toggle1:
+        st.write("") 
+        st.toggle(
+            "🏢 자사 IP 모드", 
+            key="own_ip_mode",
+        )
+        cur_toggle = bool(st.session_state.get("own_ip_mode", False))
+        prev_toggle = st.session_state.get("own_ip_toggle_prev", None)
+        
+        if cur_toggle and (prev_toggle is None or prev_toggle is False):
+            with st.spinner("데이터베이스 확인 중..."):
+                total_cnt = get_total_pgc_count()
+                
+                if total_cnt > 0:
+                    st.success(f"자사 IP 데이터 연동됨 ({total_cnt:,}개)")
+                else:
+                    st.warning("데이터가 없거나 DB 연결 실패")
+                    
+        st.session_state["own_ip_toggle_prev"] = cur_toggle
 
-    with center_area:
-        col_toggle1, col_toggle2 = st.columns(2)
+    with col_toggle2:
+        st.write("") 
+        st.toggle(
+            "🛡️ 엄격한 검색 모드", 
+            key="strict_search_mode",
+            help="체크 시 해시태그(#)가 정확히 일치하는 영상만 수집합니다. 엉뚱한 노이즈가 섞일 때 켜주세요."
+        )
 
-        with col_toggle1:
-            st.write("")
-            st.toggle(
-                "🏢 자사 IP 모드",
-                key="own_ip_mode",
-            )
-            cur_toggle = bool(st.session_state.get("own_ip_mode", False))
-            prev_toggle = st.session_state.get("own_ip_toggle_prev", None)
-
-            if cur_toggle and (prev_toggle is None or prev_toggle is False):
-                with st.spinner("데이터베이스 확인 중..."):
-                    total_cnt = get_total_pgc_count()
-
-                    if total_cnt > 0:
-                        st.success(f"자사 IP 데이터 연동됨 ({total_cnt:,}개)")
-                    else:
-                        st.warning("데이터가 없거나 DB 연결 실패")
-
-            st.session_state["own_ip_toggle_prev"] = cur_toggle
-
-        with col_toggle2:
-            st.write("")
-            st.toggle(
-                "🛡️ 엄격한 검색 모드",
-                key="strict_search_mode",
-                help="체크 시 해시태그(#)가 정확히 일치하는 영상만 수집합니다. 엉뚱한 노이즈가 섞일 때 켜주세요."
-            )
 else:
     render_metadata_and_downloads()
     render_chat()
