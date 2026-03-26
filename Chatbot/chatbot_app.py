@@ -2648,7 +2648,7 @@ if not st.session_state.chat:
 """, unsafe_allow_html=True)
 
     # ===== 검색 및 데이터 모드 설정 토글 UI =====
-    _, col_toggle1, col_toggle2, _ = st.columns([2.0, 1.5, 1.5, 1.2])
+    _, col_toggle1, col_toggle2, _ = st.columns([1.7, 1.5, 1.5, 1.2])
     
     with col_toggle1:
         st.write("") 
