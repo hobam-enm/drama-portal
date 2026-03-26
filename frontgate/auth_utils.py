@@ -69,6 +69,37 @@ LOCAL_STORAGE_KEY = str(AUTH.get("local_storage_key") or "drama_portal_auth")
 SIGNING_SECRET = str(AUTH.get("signing_secret") or "")
 
 
+ROLE_MASTER = "master"
+ROLE_ADMIN = "admin"
+ROLE_TEAM_MEMBER = "team_member"
+ROLE_USER = "user"
+ROLE_OPTIONS = [ROLE_MASTER, ROLE_ADMIN, ROLE_TEAM_MEMBER, ROLE_USER]
+INITIAL_MASTER_NAME = "김호범"
+
+
+def normalize_role(role: Optional[str], name: Optional[str] = None) -> str:
+    if str(name or "").strip() == INITIAL_MASTER_NAME:
+        return ROLE_MASTER
+    role = str(role or "").strip().lower()
+    if role in {"team", "teammember", "team_member", "member"}:
+        return ROLE_TEAM_MEMBER
+    if role in ROLE_OPTIONS:
+        return role
+    admin_role = str(AUTH.get("admin_role_name", ROLE_ADMIN) or ROLE_ADMIN).strip().lower()
+    if role == admin_role:
+        return ROLE_ADMIN
+    default_role = str(AUTH.get("default_role", ROLE_USER) or ROLE_USER).strip().lower()
+    if default_role in ROLE_OPTIONS:
+        return default_role
+    return ROLE_USER
+
+
+def is_master(payload: Optional[Dict[str, Any]]) -> bool:
+    if not payload:
+        return False
+    return normalize_role(payload.get("role"), payload.get("name")) == ROLE_MASTER
+
+
 # =========================
 # debug helpers
 # =========================
@@ -133,9 +164,8 @@ def token_hash(raw_token: str) -> str:
 
 
 def is_admin(payload: Dict[str, Any]) -> bool:
-    role = str(payload.get("role", ""))
-    admin_role = AUTH.get("admin_role_name", "admin")
-    if role == admin_role:
+    role = normalize_role(payload.get("role"), payload.get("name"))
+    if role in {ROLE_MASTER, ROLE_ADMIN}:
         return True
     perms = payload.get("perms", payload.get("permissions", []))
     return "user_manage" in perms or "approve_signup" in perms
@@ -263,6 +293,7 @@ def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
             user = c.find_one({"id": user_id})
             _debug("user lookup mongo", user_id=user_id, found=bool(user))
             if user:
+                user["role"] = normalize_role(user.get("role"), user.get("name"))
                 return user
     for u in sget("users", default=[]) or []:
         if str(dict(u).get("id")) == str(user_id):
@@ -281,7 +312,7 @@ def create_session_from_payload(payload: Dict[str, Any], source_app: str) -> str
     session_doc = {
         "token_hash": token_hash(raw),
         "user_id": str(payload.get("sub") or payload.get("id") or ""),
-        "role": str(payload.get("role") or AUTH["default_role"]),
+        "role": normalize_role(payload.get("role"), payload.get("name")),
         "allowed_apps": list(payload.get("apps") or payload.get("allowed_apps") or []),
         "permissions": list(payload.get("perms") or payload.get("permissions") or []),
         "created_at": now,
@@ -333,7 +364,7 @@ def validate_session(raw_token: str) -> Optional[Dict[str, Any]]:
     sessions.update_one({"_id": doc["_id"]}, {"$set": {"last_seen_at": now}})
     allowed_apps = list((user or {}).get("allowed_apps") or doc.get("allowed_apps") or [])
     permissions = list((user or {}).get("permissions") or doc.get("permissions") or [])
-    role = str((user or {}).get("role") or doc.get("role") or AUTH["default_role"])
+    role = normalize_role((user or {}).get("role") or doc.get("role") or AUTH["default_role"], (user or {}).get("name"))
     name = str((user or {}).get("name") or doc.get("user_id") or "")
     user_id = str((user or {}).get("id") or doc.get("user_id") or "")
     _debug("validate session success", user_id=user_id, role=role)
@@ -497,7 +528,7 @@ def check_auth(app_name: str) -> Dict[str, Any]:
                 "id": str(payload.get("sub") or ""),
                 "sub": str(payload.get("sub") or ""),
                 "name": str(payload.get("name") or payload.get("sub") or ""),
-                "role": str(payload.get("role") or AUTH["default_role"]),
+                "role": normalize_role(payload.get("role"), payload.get("name")),
                 "apps": list(payload.get("apps") or []),
                 "allowed_apps": list(payload.get("apps") or []),
                 "perms": list(payload.get("perms") or []),

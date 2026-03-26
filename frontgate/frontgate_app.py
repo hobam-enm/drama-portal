@@ -91,6 +91,67 @@ SIGNING_SECRET = str(AUTH.get("signing_secret") or "")
 PEPPER = str(AUTH.get("pepper") or "")
 
 
+ROLE_MASTER = "master"
+ROLE_ADMIN = "admin"
+ROLE_TEAM_MEMBER = "team_member"
+ROLE_USER = "user"
+ROLE_OPTIONS = [ROLE_MASTER, ROLE_ADMIN, ROLE_TEAM_MEMBER, ROLE_USER]
+INITIAL_MASTER_NAME = "김호범"
+
+
+def normalize_role(role: Optional[str], name: Optional[str] = None) -> str:
+    if str(name or "").strip() == INITIAL_MASTER_NAME:
+        return ROLE_MASTER
+    role = str(role or "").strip().lower()
+    if role in {"team", "teammember", "team_member", "member"}:
+        return ROLE_TEAM_MEMBER
+    if role in ROLE_OPTIONS:
+        return role
+    admin_role = str(AUTH.get("admin_role_name", ROLE_ADMIN) or ROLE_ADMIN).strip().lower()
+    if role == admin_role:
+        return ROLE_ADMIN
+    default_role = str(AUTH.get("default_role", ROLE_USER) or ROLE_USER).strip().lower()
+    if default_role in ROLE_OPTIONS:
+        return default_role
+    return ROLE_USER
+
+
+def role_rank(role: Optional[str], name: Optional[str] = None) -> int:
+    order = {
+        ROLE_USER: 0,
+        ROLE_TEAM_MEMBER: 1,
+        ROLE_ADMIN: 2,
+        ROLE_MASTER: 3,
+    }
+    return order.get(normalize_role(role, name=name), 0)
+
+
+def is_master(user: Optional[Dict[str, Any]]) -> bool:
+    if not user:
+        return False
+    return normalize_role(user.get("role"), user.get("name")) == ROLE_MASTER
+
+
+def can_manage_role(actor: Optional[Dict[str, Any]], target_role: Optional[str], target_name: Optional[str] = None) -> bool:
+    actor_role = normalize_role((actor or {}).get("role"), (actor or {}).get("name"))
+    desired_role = normalize_role(target_role, target_name)
+    if actor_role == ROLE_MASTER:
+        return True
+    if actor_role != ROLE_ADMIN:
+        return False
+    return desired_role in {ROLE_ADMIN, ROLE_TEAM_MEMBER, ROLE_USER}
+
+
+def can_manage_user(actor: Optional[Dict[str, Any]], target_user: Optional[Dict[str, Any]]) -> bool:
+    actor_role = normalize_role((actor or {}).get("role"), (actor or {}).get("name"))
+    target_role = normalize_role((target_user or {}).get("role"), (target_user or {}).get("name"))
+    if actor_role == ROLE_MASTER:
+        return True
+    if actor_role != ROLE_ADMIN:
+        return False
+    return target_role in {ROLE_TEAM_MEMBER, ROLE_USER}
+
+
 # =========================================================
 # cookie manager
 # =========================================================
@@ -367,6 +428,7 @@ def get_seed_users_from_secrets() -> List[Dict[str, Any]]:
         u.setdefault("active", True)
         u.setdefault("allowed_apps", [])
         u.setdefault("permissions", [])
+        u["role"] = normalize_role(u.get("role"), u.get("name"))
         normalized.append(u)
     return normalized
 
@@ -376,6 +438,7 @@ def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
         c = coll("users_coll")
         user = c.find_one({"id": user_id})
         if user:
+            user["role"] = normalize_role(user.get("role"), user.get("name"))
             return user
     for u in get_seed_users_from_secrets():
         if str(u.get("id")) == str(user_id):
@@ -402,6 +465,8 @@ def authenticate_user(login_id: str, password: str) -> Tuple[bool, Optional[Dict
         if not bool(user.get("active", True)):
             return False, None, "비활성화된 계정입니다."
         if verify_password(password, str(user.get("pw_hash") or ""), PEPPER):
+            user = dict(user)
+            user["role"] = normalize_role(user.get("role"), user.get("name"))
             return True, user, ""
 
     return False, None, "비밀번호가 올바르지 않습니다."
@@ -419,7 +484,7 @@ def create_session(user: Dict[str, Any], remember: bool = False, source_app: str
     session_doc = {
         "token_hash": token_hash(raw),
         "user_id": str(user.get("id")),
-        "role": str(user.get("role") or AUTH["default_role"]),
+        "role": normalize_role(user.get("role"), user.get("name")),
         "allowed_apps": list(user.get("allowed_apps") or []),
         "permissions": list(user.get("permissions") or []),
         "created_at": now,
@@ -479,7 +544,7 @@ def validate_session(raw_token: str) -> Optional[Dict[str, Any]]:
     return {
         "id": str(user.get("id")),
         "name": str(user.get("name") or user.get("id")),
-        "role": str(user.get("role") or AUTH["default_role"]),
+        "role": normalize_role(user.get("role"), user.get("name")),
         "allowed_apps": list(user.get("allowed_apps") or []),
         "permissions": list(user.get("permissions") or []),
         "session_token": raw_token,
@@ -562,7 +627,7 @@ def get_current_user() -> Optional[Dict[str, Any]]:
         fallback_user = {
             "id": "front_fallback",
             "name": "Front Fallback",
-            "role": AUTH["admin_role_name"],
+            "role": ROLE_MASTER,
             "allowed_apps": list((sget("apps", default={}) or {}).keys()),
             "permissions": ["user_manage", "approve_signup", "session_manage", "ytan_admin"],
             "session_token": "",
@@ -579,7 +644,7 @@ def login_user(user: Dict[str, Any], remember: bool):
         current = {
             "id": str(user.get("id")),
             "name": str(user.get("name") or user.get("id")),
-            "role": str(user.get("role") or AUTH["default_role"]),
+            "role": normalize_role(user.get("role"), user.get("name")),
             "allowed_apps": list(user.get("allowed_apps") or []),
             "permissions": list(user.get("permissions") or []),
             "session_token": raw,
@@ -588,7 +653,7 @@ def login_user(user: Dict[str, Any], remember: bool):
         current = {
             "id": str(user.get("id")),
             "name": str(user.get("name") or user.get("id")),
-            "role": str(user.get("role") or AUTH["default_role"]),
+            "role": normalize_role(user.get("role"), user.get("name")),
             "allowed_apps": list(user.get("allowed_apps") or []),
             "permissions": list(user.get("permissions") or []),
             "session_token": "",
@@ -623,7 +688,8 @@ def logout_user():
 def is_admin(user: Optional[Dict[str, Any]]) -> bool:
     if not user:
         return False
-    if str(user.get("role")) == str(AUTH.get("admin_role_name", "admin")):
+    role = normalize_role(user.get("role"), user.get("name"))
+    if role in {ROLE_MASTER, ROLE_ADMIN}:
         return True
     return "user_manage" in list(user.get("permissions") or []) or "approve_signup" in list(user.get("permissions") or [])
 
@@ -652,6 +718,9 @@ def submit_signup_request(name: str, login_id: str, password: str, password_conf
         return False, "비밀번호는 4자 이상으로 입력하세요."
 
     login_id = login_id.strip()
+    desired_role = normalize_role(role, name)
+    if not can_manage_role(admin_user, desired_role, name):
+        return False, "현재 권한으로는 해당 등급 계정을 생성할 수 없습니다."
     users_c = coll("users_coll")
     if users_c.find_one({"id": login_id}):
         return False, "이미 사용 중인 아이디입니다."
@@ -695,7 +764,7 @@ def approve_request(req: Dict[str, Any], admin_user: Dict[str, Any], allowed_app
         "name": str(req.get("name") or login_id),
         "email": str(req.get("email") or ""),
         "department": str(req.get("department") or ""),
-        "role": role or AUTH["default_role"],
+        "role": normalize_role(role or AUTH["default_role"], req.get("name")),
         "pw_hash": str(req.get("pw_hash") or ""),
         "active": True,
         "allowed_apps": list(allowed_apps or []),
@@ -713,7 +782,7 @@ def approve_request(req: Dict[str, Any], admin_user: Dict[str, Any], allowed_app
             "reviewed_at": utcnow(),
             "reviewed_by": str(admin_user.get("id")),
             "approved_apps": list(allowed_apps or []),
-            "approved_role": role or AUTH["default_role"],
+            "approved_role": normalize_role(role or AUTH["default_role"], req.get("name")),
             "approved_permissions": list(permissions or []),
         }},
     )
@@ -815,7 +884,7 @@ def create_user_by_admin(admin_user: Dict[str, Any], login_id: str, name: str, p
         "name": name,
         "email": (email or "").strip(),
         "department": (department or "").strip(),
-        "role": role or AUTH["default_role"],
+        "role": normalize_role(role or AUTH["default_role"], req.get("name")),
         "pw_hash": pbkdf2_hash_password(password, PEPPER),
         "active": True,
         "allowed_apps": list(allowed_apps or []),
@@ -846,15 +915,51 @@ def toggle_user_active(user_id: str, active: bool):
     coll("users_coll").update_one({"id": user_id}, {"$set": {"active": active}})
 
 
-def update_user_access(user_id: str, allowed_apps: List[str], role: Optional[str] = None, permissions: Optional[List[str]] = None):
+def update_user_access(actor_user: Dict[str, Any], user_id: str, allowed_apps: List[str], role: Optional[str] = None, permissions: Optional[List[str]] = None) -> Tuple[bool, str]:
     if not mongo_available():
-        return
+        return False, "MongoDB가 설정되지 않아 사용자 수정이 불가합니다."
+    target_user = coll("users_coll").find_one({"id": user_id}) or get_user_by_id(user_id)
+    if not target_user:
+        return False, "대상 사용자를 찾을 수 없습니다."
+    target_user = dict(target_user)
+    if not can_manage_user(actor_user, target_user):
+        return False, "현재 권한으로는 이 사용자를 수정할 수 없습니다."
+    desired_role = normalize_role(role if role is not None else target_user.get("role"), target_user.get("name"))
+    if not can_manage_role(actor_user, desired_role, target_user.get("name")):
+        return False, "현재 권한으로는 해당 권한 등급으로 변경할 수 없습니다."
     update_doc = {"allowed_apps": list(allowed_apps or [])}
     if role is not None:
-        update_doc["role"] = role
+        update_doc["role"] = desired_role
     if permissions is not None:
         update_doc["permissions"] = list(permissions or [])
     coll("users_coll").update_one({"id": user_id}, {"$set": update_doc})
+    return True, "접근 권한이 저장되었습니다."
+
+
+def transfer_master(actor_user: Dict[str, Any], target_user_id: str) -> Tuple[bool, str]:
+    if not mongo_available():
+        return False, "MongoDB가 설정되지 않아 마스터 이양이 불가합니다."
+    if not is_master(actor_user):
+        return False, "마스터만 마스터 권한을 이양할 수 있습니다."
+    actor_id = str(actor_user.get("id") or "")
+    target_user = coll("users_coll").find_one({"id": target_user_id}) or get_user_by_id(target_user_id)
+    if not target_user:
+        return False, "대상 사용자를 찾을 수 없습니다."
+    target_user = dict(target_user)
+    if actor_id == str(target_user.get("id") or ""):
+        return False, "이미 현재 마스터 계정입니다."
+    now = utcnow()
+    coll("users_coll").update_one(
+        {"id": actor_id},
+        {"$set": {"role": ROLE_ADMIN, "updated_at": now, "updated_by": actor_id}},
+    )
+    coll("users_coll").update_one(
+        {"id": str(target_user.get("id") or "")},
+        {"$set": {"role": ROLE_MASTER, "updated_at": now, "updated_by": actor_id}},
+    )
+    if st.session_state.get("current_user") and str(st.session_state["current_user"].get("id") or "") == actor_id:
+        st.session_state["current_user"]["role"] = ROLE_ADMIN
+    return True, f"{target_user.get('name') or target_user_id} 계정으로 마스터 권한을 이양했습니다."
 
 
 def format_dt_kst(dt: Any, default: str = "-") -> str:
@@ -1170,6 +1275,27 @@ def render_signup_panel():
 
 
 
+def role_label(role: Optional[str]) -> str:
+    role = normalize_role(role)
+    labels = {
+        ROLE_MASTER: "마스터",
+        ROLE_ADMIN: "어드민",
+        ROLE_TEAM_MEMBER: "팀원",
+        ROLE_USER: "유저",
+    }
+    return labels.get(role, role)
+
+
+def assignable_role_options(actor_user: Dict[str, Any], target_user: Optional[Dict[str, Any]] = None) -> List[str]:
+    target_name = (target_user or {}).get("name")
+    if is_master(actor_user):
+        return [ROLE_MASTER, ROLE_ADMIN, ROLE_TEAM_MEMBER, ROLE_USER]
+    if is_admin(actor_user):
+        return [ROLE_ADMIN, ROLE_TEAM_MEMBER, ROLE_USER]
+    current_role = normalize_role((target_user or {}).get("role"), target_name)
+    return [current_role]
+
+
 def render_admin_panel(admin_user: Dict[str, Any], page: str):
     st.markdown("### 🛠 관리자 페이지")
 
@@ -1199,10 +1325,14 @@ def render_admin_panel(admin_user: Dict[str, Any], page: str):
                     format_func=lambda x: app_labels.get(x, x),
                     key=f"approve_apps_{req_id}",
                 )
+                role_options = assignable_role_options(admin_user, {"name": req.get("name")})
+                default_role = normalize_role(AUTH["default_role"], req.get("name"))
+                default_index = role_options.index(default_role) if default_role in role_options else len(role_options) - 1
                 approved_role = st.selectbox(
                     "권한",
-                    [AUTH["default_role"], AUTH["admin_role_name"]],
-                    index=0,
+                    role_options,
+                    index=default_index,
+                    format_func=role_label,
                     key=f"approve_role_{req_id}",
                 )
                 approved_permissions = st.multiselect(
@@ -1264,7 +1394,10 @@ def render_admin_panel(admin_user: Dict[str, Any], page: str):
                 password_confirm = st.text_input("비밀번호 확인 *", type="password", key="admin_create_password_confirm")
                 email = st.text_input("이메일", key="admin_create_email")
                 department = st.text_input("부서", key="admin_create_department")
-                role = st.selectbox("권한", [AUTH["default_role"], AUTH["admin_role_name"]], key="admin_create_role")
+                create_role_options = assignable_role_options(admin_user)
+                default_create_role = normalize_role(AUTH["default_role"])
+                default_create_idx = create_role_options.index(default_create_role) if default_create_role in create_role_options else len(create_role_options) - 1
+                role = st.selectbox("권한", create_role_options, index=default_create_idx, format_func=role_label, key="admin_create_role")
                 allowed_apps = st.multiselect("접근 가능 서비스", app_keys, format_func=lambda x: app_labels.get(x, x), key="admin_create_apps")
                 permissions = st.multiselect("추가 권한", permission_options, key="admin_create_permissions")
                 submitted = st.form_submit_button("계정 생성", use_container_width=True)
@@ -1282,14 +1415,13 @@ def render_admin_panel(admin_user: Dict[str, Any], page: str):
                 info_col1.metric("최근 접속", format_dt_kst(session_summary.get("last_seen_at")))
                 info_col2.metric("마지막 접속 앱", str(session_summary.get("last_source_app") or "-"))
                 info_col3.metric("현재 활성 세션 수", int(session_summary.get("active_session_count") or 0))
-                st.caption(f"현재 상태: {'활성' if bool(u.get('active', True)) else '비활성'}")
+                st.caption(f"현재 상태: {'활성' if bool(u.get('active', True)) else '비활성'} · 현재 권한: {role_label(u.get('role'))}")
 
-                role_options = [AUTH["default_role"], AUTH["admin_role_name"]]
-                current_role = str(u.get("role") or AUTH["default_role"])
+                current_role = normalize_role(u.get("role"), u.get("name"))
+                role_options = assignable_role_options(admin_user, u)
                 if current_role not in role_options:
-                    role_options.append(current_role)
-
-                new_role = st.selectbox("권한", role_options, index=role_options.index(current_role), key=f"user_role_{uid}")
+                    role_options = [current_role] + role_options
+                new_role = st.selectbox("권한", role_options, index=role_options.index(current_role), format_func=role_label, key=f"user_role_{uid}")
                 user_default_apps = clean_allowed_apps(u.get("allowed_apps") or [], app_keys)
                 new_apps = st.multiselect(
                     "접근 가능 서비스",
@@ -1304,19 +1436,31 @@ def render_admin_panel(admin_user: Dict[str, Any], page: str):
                     default=[p for p in list(u.get("permissions") or []) if p in permission_options],
                     key=f"user_perms_{uid}",
                 )
+                can_edit_user = can_manage_user(admin_user, u)
                 c1, c2 = st.columns(2)
                 with c1:
-                    if mongo_available() and st.button("권한 저장", key=f"save_access_{uid}", use_container_width=True):
-                        update_user_access(uid, new_apps, role=new_role, permissions=new_perms)
-                        st.success("접근 권한이 저장되었습니다.")
-                        st.rerun()
+                    if mongo_available() and can_edit_user and st.button("권한 저장", key=f"save_access_{uid}", use_container_width=True):
+                        ok, msg = update_user_access(admin_user, uid, new_apps, role=new_role, permissions=new_perms)
+                        (st.success if ok else st.error)(msg)
+                        if ok:
+                            st.rerun()
                 with c2:
-                    if mongo_available() and uid != str(admin_user.get("id")):
+                    if mongo_available() and can_edit_user and uid != str(admin_user.get("id")):
                         currently_active = bool(u.get("active", True))
                         label = "비활성화" if currently_active else "활성화"
                         if st.button(label, key=f"toggle_{uid}", use_container_width=True):
                             toggle_user_active(uid, not currently_active)
                             st.success("상태가 변경되었습니다.")
+                            st.rerun()
+                if not can_edit_user:
+                    st.caption("현재 권한으로는 이 계정을 수정할 수 없습니다.")
+                if is_master(admin_user) and uid != str(admin_user.get("id")):
+                    st.divider()
+                    st.warning("마스터 권한 이양은 즉시 적용됩니다.")
+                    if st.button("이 계정으로 마스터 권한 이양", key=f"transfer_master_{uid}", use_container_width=True):
+                        ok, msg = transfer_master(admin_user, uid)
+                        (st.success if ok else st.error)(msg)
+                        if ok:
                             st.rerun()
 
 
