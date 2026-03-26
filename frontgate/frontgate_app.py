@@ -718,9 +718,6 @@ def submit_signup_request(name: str, login_id: str, password: str, password_conf
         return False, "비밀번호는 4자 이상으로 입력하세요."
 
     login_id = login_id.strip()
-    desired_role = normalize_role(role, name)
-    if not can_manage_role(admin_user, desired_role, name):
-        return False, "현재 권한으로는 해당 등급 계정을 생성할 수 없습니다."
     users_c = coll("users_coll")
     if users_c.find_one({"id": login_id}):
         return False, "이미 사용 중인 아이디입니다."
@@ -764,7 +761,7 @@ def approve_request(req: Dict[str, Any], admin_user: Dict[str, Any], allowed_app
         "name": str(req.get("name") or login_id),
         "email": str(req.get("email") or ""),
         "department": str(req.get("department") or ""),
-        "role": normalize_role(role or AUTH["default_role"], req.get("name")),
+        "role": normalize_role(role or AUTH["default_role"], name),
         "pw_hash": str(req.get("pw_hash") or ""),
         "active": True,
         "allowed_apps": list(allowed_apps or []),
