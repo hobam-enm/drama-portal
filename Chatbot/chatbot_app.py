@@ -2662,9 +2662,6 @@ if not st.session_state.chat:
             help=None if own_ip_allowed else "USER 권한은 자사 IP 모드를 사용할 수 없습니다."
         )
 
-        if not own_ip_allowed:
-            st.session_state["own_ip_mode"] = False
-
         cur_toggle = bool(st.session_state.get("own_ip_mode", False))
         prev_toggle = st.session_state.get("own_ip_toggle_prev", None)
 
@@ -2680,9 +2677,9 @@ if not st.session_state.chat:
         st.session_state["own_ip_toggle_prev"] = cur_toggle
 
     with col_toggle2:
-        st.write("") 
+        st.write("")
         st.toggle(
-            "🛡️ 엄격한 검색 모드", 
+            "🛡️ 엄격한 검색 모드",
             key="strict_search_mode",
             help="체크 시 해시태그(#)가 정확히 일치하는 영상만 수집합니다. 엉뚱한 노이즈가 섞일 때 켜주세요."
         )
