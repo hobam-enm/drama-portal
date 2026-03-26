@@ -2679,6 +2679,14 @@ if not st.session_state.chat:
 
         st.session_state["own_ip_toggle_prev"] = cur_toggle
 
+    with col_toggle2:
+        st.write("") 
+        st.toggle(
+            "🛡️ 엄격한 검색 모드", 
+            key="strict_search_mode",
+            help="체크 시 해시태그(#)가 정확히 일치하는 영상만 수집합니다. 엉뚱한 노이즈가 섞일 때 켜주세요."
+        )
+
 else:
     render_metadata_and_downloads()
     render_chat()
