@@ -363,20 +363,39 @@ def ensure_state():
 
 
 def _reset_chat_only(keep_auth: bool = True):
-    auth_keys = {
-        "auth_ok", "auth_user_id", "auth_role", "auth_display_name",
-        "client_instance_id", "_auth_users_cache"
+    """챗봇 내부 상태만 초기화.
+
+    주의:
+    - frontgate.check_auth()가 내부적으로 어떤 session_state 키를 쓰는지 이 파일에서는
+      보장할 수 없으므로, 예전처럼 '인증키 몇 개만 남기고 나머지를 전부 삭제'하면
+      앱 내부 버튼 클릭 후 인증 컨텍스트가 사라질 수 있다.
+    - 따라서 여기서는 삭제 대상을 화이트리스트가 아니라, 챗봇 전용 키들로 한정한다.
+    """
+    keys_to_clear = {
+        # chat / analysis payload
+        "chat", "last_schema", "last_csv", "last_df", "sample_text",
+        "sample_count", "sample_chars", "sample_meta",
+        "sample_text_full_context", "analysis_scope_line",
+        "loaded_session_name", "current_cache",
+        # ui / chatbot options
+        "own_ip_mode", "own_ip_toggle_prev", "strict_search_mode",
+        # transient workflow state
+        "editing_session",
+        # youtube / gemini app-local rotation/cache state
+        "yt_key_idx", "gem_key_idx", "yt_rt_session", "yt_rt_session_keys",
     }
-    safe_flow_keys = {"session_to_load", "session_to_delete", 'session_to_rename'}
-    keep = set()
-    if keep_auth:
-        keep |= auth_keys
-    keep |= safe_flow_keys
+
+    # 저장 세션 액션 플래그는 유지
+    if not keep_auth:
+        # 명시적 로그아웃일 때만 이 파일이 직접 관리하는 auth 표면 키를 제거
+        keys_to_clear |= {
+            "auth_ok", "auth_user_id", "auth_role", "auth_display_name",
+            "client_instance_id", "_auth_users_cache", "_auth_token",
+        }
 
     for k in list(st.session_state.keys()):
-        if k in keep:
-            continue
-        del st.session_state[k]
+        if k in keys_to_clear:
+            del st.session_state[k]
 
     ensure_state()
 
