@@ -2683,14 +2683,122 @@ def get_agg_kpis_for_ip_page4(df_ip: pd.DataFrame) -> Dict[str, float | None]:
 
 
 # ===== 10.3. [페이지 4] KPI 카드 렌더링 (상단) =====
-def _render_kpi_row_ip_vs_group(kpis_ip, kpis_group, ranks, group_name):
-    def _calc_delta(ip_val, group_val): 
+def _render_kpi_row_ip_vs_group(kpis_ip, kpis_group, ranks, group_name, df_group=None, target_ip=None, cutoff_label=None):
+    def _calc_delta(ip_val, group_val):
         ip_val = ip_val or 0
         group_val = group_val or 0
-        if group_val is None or group_val == 0: return None
+        if group_val is None or group_val == 0:
+            return None
         return (ip_val - group_val) / group_val
 
-    def _kpi_card_html(title, val_str, delta, rank_tuple):
+    def _fmt_tooltip_value(v, percent=False, intlike=False, digits=2):
+        if v is None or pd.isna(v):
+            return "–"
+        if percent:
+            return f"{float(v):.{digits}f}%"
+        if intlike:
+            return f"{float(v):,.0f}"
+        return f"{float(v):.{digits}f}"
+
+    def _series_for_metric(metric_key: str) -> pd.Series:
+        if df_group is None or df_group.empty:
+            return pd.Series(dtype=float)
+
+        frame = df_group.copy()
+        frame["value"] = pd.to_numeric(frame["value"], errors="coerce")
+        frame = frame.dropna(subset=["value"])
+        if frame.empty:
+            return pd.Series(dtype=float)
+
+        if metric_key in ["T시청률", "H시청률", "화제성 점수"]:
+            metric_name = metric_key if metric_key != "화제성 점수" else "F_Score"
+            sub = frame[frame["metric"] == metric_name].copy()
+            if sub.empty:
+                return pd.Series(dtype=float)
+            ep_mean = sub.groupby(["IP", "회차_numeric"], as_index=False)["value"].mean()
+            return ep_mean.groupby("IP")["value"].mean().sort_values(ascending=False)
+
+        if metric_key == "TVING LIVE":
+            sub = frame[(frame["metric"] == "시청인구") & (frame["매체"] == "TVING LIVE")].copy()
+            if sub.empty:
+                return pd.Series(dtype=float)
+            ep_sum = sub.groupby(["IP", "회차_numeric"], as_index=False)["value"].sum()
+            return ep_sum.groupby("IP")["value"].mean().sort_values(ascending=False)
+
+        if metric_key == "TVING VOD":
+            sub = frame[(frame["metric"] == "시청인구") & (frame["매체"].isin(["TVING VOD", "TVING QUICK"]))].copy()
+            if sub.empty:
+                return pd.Series(dtype=float)
+            ep_sum = sub.groupby(["IP", "회차_numeric"], as_index=False)["value"].sum()
+            return ep_sum.groupby("IP")["value"].mean().sort_values(ascending=False)
+
+        if metric_key == "디지털 조회수":
+            sub = _get_view_data(frame)
+            if sub.empty:
+                return pd.Series(dtype=float)
+            return sub.groupby("IP")["value"].sum().sort_values(ascending=False)
+
+        if metric_key == "디지털 언급량":
+            sub = frame[frame["metric"] == "언급량"].copy()
+            if sub.empty:
+                return pd.Series(dtype=float)
+            return sub.groupby("IP")["value"].sum().sort_values(ascending=False)
+
+        return pd.Series(dtype=float)
+
+    def _detail_rows(metric_key: str, window: int = 3):
+        if not target_ip:
+            return []
+        s = _series_for_metric(metric_key)
+        if s.empty:
+            return []
+
+        ranks_series = s.rank(method="min", ascending=False).astype(int)
+        rows = [
+            {
+                "ip": name,
+                "rank": int(ranks_series.loc[name]),
+                "value": float(val),
+                "is_me": (name == target_ip),
+            }
+            for name, val in s.items()
+        ]
+        my_idx = next((i for i, row in enumerate(rows) if row["ip"] == target_ip), None)
+        if my_idx is None:
+            return rows[: max(1, window * 2 + 1)]
+
+        start = max(0, my_idx - window)
+        end = min(len(rows), my_idx + window + 1)
+        return rows[start:end]
+
+    def _tooltip_html(metric_key: str):
+        detail_rows = _detail_rows(metric_key)
+        if not detail_rows:
+            return ""
+
+        percent = metric_key in ["T시청률", "H시청률"]
+        intlike = metric_key in ["TVING LIVE", "TVING VOD", "디지털 조회수", "디지털 언급량", "화제성 점수"]
+        cutoff_txt = f" / 기준: {cutoff_label}" if cutoff_label else ""
+        lines = [f"<div class='rank-tip-title'>비교군: {group_name}{cutoff_txt}</div>"]
+        for row in detail_rows:
+            name_style = "font-weight:700; color:#111827;" if row["is_me"] else "color:#374151;"
+            row_style = "background:#eef4ff;" if row["is_me"] else ""
+            lines.append(
+                "<div class='rank-tip-row' style='{}'>"
+                "<span class='rank-tip-rank'>{}위</span>"
+                "<span class='rank-tip-name' style='{}'>{}</span>"
+                "<span class='rank-tip-val'>{}</span>"
+                "</div>".format(
+                    row_style,
+                    row["rank"],
+                    name_style,
+                    row["ip"],
+                    _fmt_tooltip_value(row["value"], percent=percent, intlike=intlike, digits=2),
+                )
+            )
+        return "".join(lines)
+
+    def _kpi_card_html(title, val_str, delta, rank_tuple, metric_key):
         if delta is None:
             delta_html = "<span style='color:#9ca3af; font-size:13px;'>-</span>"
         else:
@@ -2701,10 +2809,15 @@ def _render_kpi_row_ip_vs_group(kpis_ip, kpis_group, ranks, group_name):
 
         if rank_tuple and rank_tuple[1] > 0:
             rnk, total = rank_tuple
-            rank_html = f"<span style='color:#6b7280; font-size:12px; margin-left:6px;'>({rnk}위/{total}작품)</span>"
+            tip_html = _tooltip_html(metric_key)
+            help_html = (
+                f"<span class='rank-help-wrap'><span class='rank-help-icon'>i</span><span class='rank-help-bubble'>{tip_html}</span></span>"
+                if tip_html else ""
+            )
+            rank_html = f"<span style='color:#6b7280; font-size:12px; margin-left:6px;'>({rnk}위/{total}작품)</span>{help_html}"
         else:
             rank_html = ""
-        
+
         return f"""
         <div class="kpi-card" style="padding: 14px 10px;">
             <div class="kpi-title">{title}</div>
@@ -2714,26 +2827,26 @@ def _render_kpi_row_ip_vs_group(kpis_ip, kpis_group, ranks, group_name):
         """
 
     st.markdown(f"#### 1. 주요 성과 ({group_name} 대비)")
-    
+
     keys = ["T시청률", "H시청률", "TVING LIVE", "TVING VOD", "디지털 조회수", "디지털 언급량", "화제성 점수"]
     titles = ["🎯 타깃시청률", "🏠 가구시청률", "⚡ 티빙 LIVE UV", "▶️ 티빙 VOD UV", "👀 디지털 조회", "💬 디지털 언급", "🔥 화제성 점수"]
-    
+
     cols = st.columns(7)
     for i, key in enumerate(keys):
         val = kpis_ip.get(key)
         base_val = kpis_group.get(key)
         delta = _calc_delta(val, base_val)
         rank_info = ranks.get(key, (None, 0))
-        
+
         if key in ["T시청률", "H시청률"]:
             val_str = f"{val:.2f}%" if val is not None else "–"
         elif key == "디지털 조회수":
             val_str = _fmt_kor_large(val)
         else:
             val_str = f"{val:,.0f}" if val is not None else "–"
-            
+
         with cols[i]:
-            st.markdown(_kpi_card_html(titles[i], val_str, delta, rank_info), unsafe_allow_html=True)
+            st.markdown(_kpi_card_html(titles[i], val_str, delta, rank_info, key), unsafe_allow_html=True)
 
 
 def _render_kpi_row_ip_vs_ip(kpis1, kpis2, ip1, ip2):
@@ -3261,7 +3374,7 @@ def render_comparison():
             val = kpis_target.get(k)
             ranks[k] = _calc_rank_in_group(df_comp, val, k)
 
-        _render_kpi_row_ip_vs_group(kpis_target, kpis_comp, ranks, comp_name)
+        _render_kpi_row_ip_vs_group(kpis_target, kpis_comp, ranks, comp_name, df_group=df_comp, target_ip=selected_ip1, cutoff_label=(selected_max_ep if selected_max_ep != "전체" else None))
         _render_unified_charts(df_target, df_comp, selected_ip1, comp_name, kpi_percentiles, comp_color="#aaaaaa")
 
     else: # IP vs IP
