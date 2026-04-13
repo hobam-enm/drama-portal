@@ -3786,8 +3786,8 @@ def render_pre_launch_analysis():
     
     # --- 1. 색상 및 스타일 정의 ---
     C_TARGET = "#283593"  # Target (Deep Indigo)
-    C_PREV   = "#78909C"  # Previous (Blue Grey)
-    C_GROUP  = "#EEEEEE"  # Group (Light Grey)
+    C_PREV   = "#1E88E5"  # Previous (Blue)
+    C_GROUP  = "#4B5563"  # Group (Dark Gray)
     
     # --- 2. 분석 대상 지표 설정 ---
     SISA_MAP = {
@@ -3860,8 +3860,13 @@ def render_pre_launch_analysis():
     if prev_ip_name:
         df_prev = df_all[df_all["IP"] == prev_ip_name].copy()
         prev_label = f"전작({prev_ip_name})"
-    
-    group_label = "그룹 평균"
+
+    def _build_group_label(selected_years, prog_option, prog_name):
+        year_part = "-".join([str(y).replace("년", "") for y in selected_years]) if selected_years else "전체연도"
+        prog_part = "동일편성 평균" if prog_option == "동일 편성" and prog_name else "전체 평균"
+        return f"{year_part} {prog_part}"
+
+    group_label = _build_group_label(sel_years, comp_prog_opt, default_prog)
 
     st.divider()
 
@@ -3951,6 +3956,30 @@ def render_pre_launch_analysis():
             sorter = {k: v for v, k in enumerate(target_weeks)}
             return grp.sort_index(key=lambda x: x.map(sorter))
 
+        def _format_text_values(series):
+            if metric_name == "조회수":
+                return [f"{int(v/10000)}만" if v >= 10000 else f"{int(v)}" for v in series.values]
+            if metric_name == "언급량":
+                return [f"{v:,.0f}" for v in series.values]
+            return [f"{v:.1f}" for v in series.values]
+
+        def _calc_y_range(*series_list):
+            values = []
+            for s in series_list:
+                if s is not None and len(s) > 0:
+                    values.extend([float(v) for v in s.values if pd.notna(v)])
+            if not values:
+                return None
+            y_min = min(values)
+            y_max = max(values)
+            span = y_max - y_min
+            pad = max(span * 0.18, abs(y_max) * 0.12 if y_max != 0 else 1)
+            lower = min(0, y_min - pad * 0.35)
+            upper = y_max + pad
+            if lower == upper:
+                upper = lower + 1
+            return [lower, upper]
+
         s_target = _fetch_trend_data(df_target, metric_name)
         s_group  = _fetch_trend_data(df_group,  metric_name)
         s_prev   = _fetch_trend_data(df_prev,   metric_name)
@@ -3974,43 +4003,43 @@ def render_pre_launch_analysis():
             hover_template = "%{x}<br>%{data.name}: %{y:.1f}<extra></extra>"
 
         fig.add_trace(go.Scatter(
-            x=s_group.index, y=s_group.values, mode='lines',
-            name=group_label, 
+            x=s_group.index, y=s_group.values, mode='lines+markers+text',
+            name=group_label,
             line=dict(color=C_GROUP, width=2),
+            marker=dict(size=5, color=C_GROUP),
+            text=_format_text_values(s_group), textposition="top left",
+            textfont=dict(size=10, color=C_GROUP),
             hovertemplate=hover_template, customdata=custom_group
         ))
         
         fig.add_trace(go.Scatter(
-            x=s_prev.index, y=s_prev.values, mode='lines+markers',
-            name=prev_label, 
+            x=s_prev.index, y=s_prev.values, mode='lines+markers+text',
+            name=prev_label,
             line=dict(color=C_PREV, width=2, dash='dot'),
-            marker=dict(size=6),
+            marker=dict(size=6, color=C_PREV),
+            text=_format_text_values(s_prev), textposition="bottom right",
+            textfont=dict(size=10, color=C_PREV),
             hovertemplate=hover_template, customdata=custom_prev
         ))
 
-        if metric_name == "조회수":
-            text_vals = [f"{int(v/10000)}만" if v > 10000 else f"{int(v)}" for v in s_target.values]
-        elif metric_name == "언급량":
-            text_vals = [f"{v:,.0f}" for v in s_target.values]
-        else:
-            text_vals = [f"{v:.1f}" for v in s_target.values]
-
         fig.add_trace(go.Scatter(
             x=s_target.index, y=s_target.values, mode='lines+markers+text',
-            name=global_ip, 
+            name=global_ip,
             line=dict(color=C_TARGET, width=3),
             marker=dict(size=8, color=C_TARGET),
-            text=text_vals, textposition="top center",
-            textfont=dict(size=12, color=C_TARGET, weight="bold"),
+            text=_format_text_values(s_target), textposition="top center",
+            textfont=dict(size=12, color=C_TARGET),
             hovertemplate=hover_template, customdata=custom_target
         ))
+
+        y_range = _calc_y_range(s_target, s_group, s_prev)
 
         fig.update_layout(
             title=dict(text=f"📈 {title}", font=dict(size=15)),
             height=280, margin=dict(t=40, b=20, l=10, r=10),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             xaxis=dict(categoryorder="array", categoryarray=target_weeks, showgrid=False),
-            yaxis=dict(showgrid=True, gridcolor='#f0f0f0', zeroline=False, showticklabels=False),
+            yaxis=dict(range=y_range, showgrid=True, gridcolor='#f0f0f0', zeroline=False, showticklabels=False),
             plot_bgcolor='rgba(0,0,0,0)',
             hovermode="x unified"
         )
@@ -4022,10 +4051,17 @@ def render_pre_launch_analysis():
     st.markdown("---")
     
     st.markdown("###### 🧠 MPI 추이")
-    c_m1, c_m2, c_m3 = st.columns(3)
-    with c_m1: _draw_trend_line_chart("MPI_인지", "인지도", WEEKS_MPI)
-    with c_m2: _draw_trend_line_chart("MPI_선호", "선호도", WEEKS_MPI)
-    with c_m3: _draw_trend_line_chart("MPI_시청의향", "시청의향", WEEKS_MPI)
+    c_m1, c_m2 = st.columns(2)
+    with c_m1:
+        _draw_trend_line_chart("MPI_인지", "인지도", WEEKS_MPI)
+    with c_m2:
+        _draw_trend_line_chart("MPI_선호", "선호도", WEEKS_MPI)
+
+    c_m3_left, c_m3_right = st.columns(2)
+    with c_m3_left:
+        _draw_trend_line_chart("MPI_시청의향", "시청의향", WEEKS_MPI)
+    with c_m3_right:
+        st.empty()
 
     st.markdown("---")
 
