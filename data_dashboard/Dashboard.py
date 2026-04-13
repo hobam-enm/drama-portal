@@ -4002,43 +4002,72 @@ def render_pre_launch_analysis():
             custom_target, custom_group, custom_prev = None, None, None
             hover_template = "%{x}<br>%{data.name}: %{y:.1f}<extra></extra>"
 
+        # 선/마커를 먼저 그리고, 텍스트 라벨은 별도 text trace로 마지막에 올려
+        # 어떤 선에도 가리지 않도록 렌더 순서를 보장합니다.
         fig.add_trace(go.Scatter(
-            x=s_group.index, y=s_group.values, mode='lines+markers+text',
+            x=s_group.index, y=s_group.values, mode='lines+markers',
             name=group_label,
             line=dict(color=C_GROUP, width=2),
             marker=dict(size=5, color=C_GROUP),
-            text=_format_text_values(s_group), textposition="top left",
-            textfont=dict(size=10, color=C_GROUP),
             hovertemplate=hover_template, customdata=custom_group
         ))
         
         fig.add_trace(go.Scatter(
-            x=s_prev.index, y=s_prev.values, mode='lines+markers+text',
+            x=s_prev.index, y=s_prev.values, mode='lines+markers',
             name=prev_label,
             line=dict(color=C_PREV, width=2, dash='dot'),
             marker=dict(size=6, color=C_PREV),
-            text=_format_text_values(s_prev), textposition="bottom right",
-            textfont=dict(size=10, color=C_PREV),
             hovertemplate=hover_template, customdata=custom_prev
         ))
 
         fig.add_trace(go.Scatter(
-            x=s_target.index, y=s_target.values, mode='lines+markers+text',
+            x=s_target.index, y=s_target.values, mode='lines+markers',
             name=global_ip,
             line=dict(color=C_TARGET, width=3),
             marker=dict(size=8, color=C_TARGET),
-            text=_format_text_values(s_target), textposition="top center",
-            textfont=dict(size=12, color=C_TARGET),
             hovertemplate=hover_template, customdata=custom_target
+        ))
+
+        fig.add_trace(go.Scatter(
+            x=s_group.index, y=s_group.values, mode='text',
+            text=_format_text_values(s_group),
+            textposition="top left",
+            textfont=dict(size=12, color=C_GROUP),
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+
+        fig.add_trace(go.Scatter(
+            x=s_prev.index, y=s_prev.values, mode='text',
+            text=_format_text_values(s_prev),
+            textposition="bottom right",
+            textfont=dict(size=12, color=C_PREV),
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+
+        fig.add_trace(go.Scatter(
+            x=s_target.index, y=s_target.values, mode='text',
+            text=[f"<b>{v}</b>" for v in _format_text_values(s_target)],
+            textposition="top center",
+            textfont=dict(size=14, color=C_TARGET),
+            showlegend=False,
+            hoverinfo='skip'
         ))
 
         y_range = _calc_y_range(s_target, s_group, s_prev)
 
         fig.update_layout(
-            title=dict(text=f"📈 {title}", font=dict(size=15)),
+            title=dict(text=f"📈 {title}", font=dict(size=17)),
             height=280, margin=dict(t=40, b=20, l=10, r=10),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            xaxis=dict(categoryorder="array", categoryarray=target_weeks, showgrid=False),
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                font=dict(size=13)
+            ),
+            xaxis=dict(
+                categoryorder="array", categoryarray=target_weeks, showgrid=False,
+                tickfont=dict(size=12)
+            ),
             yaxis=dict(range=y_range, showgrid=True, gridcolor='#f0f0f0', zeroline=False, showticklabels=False),
             plot_bgcolor='rgba(0,0,0,0)',
             hovermode="x unified"
