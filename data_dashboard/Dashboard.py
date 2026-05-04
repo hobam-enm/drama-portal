@@ -580,6 +580,63 @@ def _mean_of_ip_episode_agg(df: pd.DataFrame, metric_name: str, media=None, epis
 def mean_of_ip_episode_sum(df: pd.DataFrame, metric_name: str, media=None) -> float | None:
     return _mean_of_ip_episode_agg(df, metric_name, media=media, episode_agg="sum")
 
+
+
+def _series_tving_vod_combined_on_vod_eps(df: pd.DataFrame) -> pd.Series:
+    """TVING VOD 통합값(QUICK+VOD)을 계산하되, TVING VOD가 존재하는 회차까지만 평균낸다.
+    - 예: TVING VOD가 2회차까지, TVING QUICK이 3회차까지 있으면 1~2회차만 QUICK+VOD 합산 후 평균
+    - IP별로 각자의 TVING VOD 존재 회차를 기준으로 계산
+    """
+    if df is None or df.empty:
+        return pd.Series(dtype=float)
+
+    ep_col = _episode_col(df)
+    required_cols = {"IP", "metric", "매체", "value", ep_col}
+    if not required_cols.issubset(set(df.columns)):
+        return pd.Series(dtype=float)
+
+    vod_eps = df[
+        (df["metric"] == "시청인구") &
+        (df["매체"] == "TVING VOD")
+    ].copy()
+    if vod_eps.empty:
+        return pd.Series(dtype=float)
+
+    vod_eps = vod_eps.dropna(subset=[ep_col]).copy()
+    vod_eps["value"] = pd.to_numeric(vod_eps["value"], errors="coerce").replace(0, np.nan)
+    vod_eps = vod_eps.dropna(subset=["value"])
+    if vod_eps.empty:
+        return pd.Series(dtype=float)
+
+    valid_eps = vod_eps[["IP", ep_col]].drop_duplicates()
+
+    sub = df[
+        (df["metric"] == "시청인구") &
+        (df["매체"].isin(["TVING VOD", "TVING QUICK"]))
+    ].copy()
+    if sub.empty:
+        return pd.Series(dtype=float)
+
+    sub = sub.dropna(subset=[ep_col]).copy()
+    sub["value"] = pd.to_numeric(sub["value"], errors="coerce").replace(0, np.nan)
+    sub = sub.dropna(subset=["value"])
+    if sub.empty:
+        return pd.Series(dtype=float)
+
+    sub = sub.merge(valid_eps, on=["IP", ep_col], how="inner")
+    if sub.empty:
+        return pd.Series(dtype=float)
+
+    ep_sum = sub.groupby(["IP", ep_col], as_index=False)["value"].sum()
+    return ep_sum.groupby("IP")["value"].mean()
+
+
+def mean_tving_vod_combined_on_vod_eps(df: pd.DataFrame) -> float | None:
+    """TVING VOD 통합값(QUICK+VOD)의 IP별 회차평균을 평균낸다. 평균 기준 회차는 TVING VOD 존재 회차."""
+    s = _series_tving_vod_combined_on_vod_eps(df)
+    return float(s.mean()) if not s.empty else None
+
+
 def mean_of_ip_episode_mean(df: pd.DataFrame, metric_name: str, media=None) -> float | None:
     return _mean_of_ip_episode_agg(df, metric_name, media=media, episode_agg="mean")
 
@@ -1714,6 +1771,8 @@ def render_ip_detail():
     
     # ===== Aggregation Helpers =====
     def _series_ip_metric(base_df: pd.DataFrame, metric_name: str, mode: str = "mean", media: List[str] | None = None):
+        if media is not None and metric_name == "시청인구" and set(media) == {"TVING VOD", "TVING QUICK"}:
+            return _series_tving_vod_combined_on_vod_eps(base_df)
         if metric_name == "조회수": sub = _get_view_data(base_df)
         else: sub = _metric_filter(base_df, metric_name).copy()
         if media is not None: sub = sub[sub["매체"].isin(media)]
@@ -1885,7 +1944,7 @@ def render_ip_detail():
     val_H = mean_of_ip_episode_mean(f, "H시청률")
     val_live = mean_of_ip_episode_sum(f, "시청인구", ["TVING LIVE"])
     val_quick = mean_of_ip_episode_sum(f, "시청인구", ["TVING QUICK"]) 
-    val_vod = mean_of_ip_episode_sum(f, "시청인구", ["TVING VOD", "TVING QUICK"])
+    val_vod = mean_tving_vod_combined_on_vod_eps(f)
     val_wavve = mean_of_ip_episode_sum(f, "시청자수", ["웨이브"])
     val_netflix_best = _min_of_ip_metric(f, "N_W순위")
     val_buzz = mean_of_ip_sums(f, "언급량")
@@ -1898,7 +1957,7 @@ def render_ip_detail():
     base_H = mean_of_ip_episode_mean(_base_slice_for_metric(base_raw, f, "H시청률", "episode"), "H시청률")
     base_live = mean_of_ip_episode_sum(_base_slice_for_metric(base_raw, f, "시청인구", "episode"), "시청인구", ["TVING LIVE"])
     base_quick = mean_of_ip_episode_sum(_base_slice_for_metric(base_raw, f, "시청인구", "episode"), "시청인구", ["TVING QUICK"])
-    base_vod = mean_of_ip_episode_sum(_base_slice_for_metric(base_raw, f, "시청인구", "episode", media=["TVING VOD", "TVING QUICK"]), "시청인구", ["TVING VOD", "TVING QUICK"])
+    base_vod = mean_tving_vod_combined_on_vod_eps(_base_slice_for_metric(base_raw, f, "시청인구", "episode", media=["TVING VOD"]))
     base_wavve = mean_of_ip_episode_sum(_base_slice_for_metric(base_raw, f, "시청자수", "episode"), "시청자수", ["웨이브"])
     
     base_netflix_series = _series_ip_metric(_base_slice_for_metric(base_raw, f, "N_W순위", "week"), "N_W순위", mode="min")
@@ -1922,7 +1981,7 @@ def render_ip_detail():
     rk_H     = _rank_within_program(_base_slice_for_metric(base_raw, f, "H시청률", "episode"), "H시청률", ip_selected, val_H,   mode="mean",        media=None)
     rk_live  = _rank_within_program(_base_slice_for_metric(base_raw, f, "시청인구", "episode"), "시청인구", ip_selected, val_live,  mode="ep_sum_mean", media=["TVING LIVE"])
     rk_quick = _rank_within_program(_base_slice_for_metric(base_raw, f, "시청인구", "episode"), "시청인구", ip_selected, val_quick, mode="ep_sum_mean", media=["TVING QUICK"])
-    rk_vod   = _rank_within_program(_base_slice_for_metric(base_raw, f, "시청인구", "episode", media=["TVING VOD", "TVING QUICK"]), "시청인구", ip_selected, val_vod,   mode="ep_sum_mean", media=["TVING VOD", "TVING QUICK"])
+    rk_vod   = _rank_within_program(_base_slice_for_metric(base_raw, f, "시청인구", "episode", media=["TVING VOD"]), "시청인구", ip_selected, val_vod,   mode="ep_sum_mean", media=["TVING VOD", "TVING QUICK"])
 
     rk_wavve = _rank_within_program(_base_slice_for_metric(base_raw, f, "시청자수", "episode"), "시청자수", ip_selected, val_wavve, mode="ep_sum_mean", media=["웨이브"])
 
@@ -1936,7 +1995,7 @@ def render_ip_detail():
     detail_H     = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "H시청률", "episode"), "H시청률", ip_selected, mode="mean")
     detail_live  = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "시청인구", "episode"), "시청인구", ip_selected, mode="ep_sum_mean", media=["TVING LIVE"])
     detail_quick = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "시청인구", "episode"), "시청인구", ip_selected, mode="ep_sum_mean", media=["TVING QUICK"])
-    detail_vod   = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "시청인구", "episode", media=["TVING VOD", "TVING QUICK"]), "시청인구", ip_selected, mode="ep_sum_mean", media=["TVING VOD", "TVING QUICK"])
+    detail_vod   = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "시청인구", "episode", media=["TVING VOD"]), "시청인구", ip_selected, mode="ep_sum_mean", media=["TVING VOD", "TVING QUICK"])
     detail_view  = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "조회수", "week"), "조회수", ip_selected, mode="sum")
     detail_buzz  = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "언급량", "week"), "언급량", ip_selected, mode="sum")
     detail_fscr  = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "F_score", "week"), "F_score", ip_selected, mode="mean")
@@ -1947,7 +2006,7 @@ def render_ip_detail():
     cut_H     = _cutoff_label_for_metric(f, "H시청률", "episode")
     cut_live  = _cutoff_label_for_metric(f, "시청인구", "episode", media=["TVING LIVE"])
     cut_quick = _cutoff_label_for_metric(f, "시청인구", "episode", media=["TVING QUICK"])
-    cut_vod   = _cutoff_label_for_metric(f, "시청인구", "episode", media=["TVING VOD", "TVING QUICK"])
+    cut_vod   = _cutoff_label_for_metric(f, "시청인구", "episode", media=["TVING VOD"])
 
     c1, c2, c3, c4, c5 = st.columns(5)
     kpi_with_rank(c1, "🎯 타깃시청률",        val_T,     base_T,     rk_T,     prog_label, digits=3,  cutoff_label=cut_T, detail_rows=detail_T)
@@ -2059,8 +2118,8 @@ def render_ip_detail():
             ep_order = combined[["회차", "회차_num"]].drop_duplicates().sort_values("회차_num")["회차"].tolist()
             pvt = pvt.reindex(ep_order)
 
-            tving_stack_order = ["LIVE", "당일 VOD", "주간 VOD"]
-            tving_colors = {"LIVE": "#90caf9", "당일 VOD": "#64b5f6", "주간 VOD": "#1565c0"}
+            tving_stack_order = ["LIVE", "당일 VOD", "주간 VOD (당일제외)"]
+            tving_colors = {"LIVE": "#90caf9", "당일 VOD": "#64b5f6", "주간 VOD (당일제외)": "#1565c0"}
 
             fig_ott = go.Figure()
 
@@ -2632,13 +2691,8 @@ def get_kpi_data_for_all_ips(df_all: pd.DataFrame, max_ep: float = None) -> pd.D
     kpi_t_rating = _ip_mean_of_ep_mean("T시청률")
     kpi_h_rating = _ip_mean_of_ep_mean("H시청률")
 
-    # TVING VOD + QUICK
-    sub_vod_all = df[(df["metric"] == "시청인구") & (df["매체"].isin(["TVING VOD", "TVING QUICK"]))]
-    if not sub_vod_all.empty:
-        vod_ep_sum = sub_vod_all.groupby(["IP", "회차_numeric"])["value"].sum().reset_index()
-        kpi_vod = vod_ep_sum.groupby("IP")["value"].mean().rename("TVING VOD")
-    else:
-        kpi_vod = pd.Series(dtype=float, name="TVING VOD")
+    # TVING VOD + QUICK (단, TVING VOD가 존재하는 회차까지만 평균)
+    kpi_vod = _series_tving_vod_combined_on_vod_eps(df).rename("TVING VOD")
 
     # TVING LIVE
     sub_live = df[(df["metric"] == "시청인구") & (df["매체"] == "TVING LIVE")]
@@ -2674,7 +2728,7 @@ def get_agg_kpis_for_ip_page4(df_ip: pd.DataFrame) -> Dict[str, float | None]:
     kpis = {}
     kpis["T시청률"] = mean_of_ip_episode_mean(df_ip, "T시청률")
     kpis["H시청률"] = mean_of_ip_episode_mean(df_ip, "H시청률")
-    kpis["TVING VOD"] = mean_of_ip_episode_sum(df_ip, "시청인구", ["TVING VOD", "TVING QUICK"])
+    kpis["TVING VOD"] = mean_tving_vod_combined_on_vod_eps(df_ip)
     kpis["TVING LIVE"] = mean_of_ip_episode_sum(df_ip, "시청인구", ["TVING LIVE"])
     kpis["디지털 조회수"] = mean_of_ip_sums(df_ip, "조회수")
     kpis["디지털 언급량"] = mean_of_ip_sums(df_ip, "언급량")
@@ -2726,11 +2780,7 @@ def _render_kpi_row_ip_vs_group(kpis_ip, kpis_group, ranks, group_name, df_group
             return ep_sum.groupby("IP")["value"].mean().sort_values(ascending=False)
 
         if metric_key == "TVING VOD":
-            sub = frame[(frame["metric"] == "시청인구") & (frame["매체"].isin(["TVING VOD", "TVING QUICK"]))].copy()
-            if sub.empty:
-                return pd.Series(dtype=float)
-            ep_sum = sub.groupby(["IP", "회차_numeric"], as_index=False)["value"].sum()
-            return ep_sum.groupby("IP")["value"].mean().sort_values(ascending=False)
+            return _series_tving_vod_combined_on_vod_eps(frame).sort_values(ascending=False)
 
         if metric_key == "디지털 조회수":
             sub = _get_view_data(frame)
