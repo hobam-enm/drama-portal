@@ -1944,14 +1944,26 @@ def render_actor_radar(result_df: pd.DataFrame, chart_names: List[str], title: s
 
 # ===== AI 배우 비교/탐색 기능 =====
 
-DISCOVERY_GRADE_RANGES = {
-    "전체": GRADE_ORDER,
-    "S": ["S"],
-    "A급 이상": ["S", "A++", "A+", "A"],
-    "B++ 이상": ["S", "A++", "A+", "A", "B++"],
-    "B+ 이상": ["S", "A++", "A+", "A", "B++", "B+"],
-    "B 이상": ["S", "A++", "A+", "A", "B++", "B+", "B"],
-}
+def get_grade_range_by_bounds(upper_grade: str, lower_grade: str) -> List[str]:
+    """GRADE_ORDER 기준으로 상단/하단 등급 사이의 등급 목록을 반환합니다.
+
+    GRADE_ORDER는 높은 등급에서 낮은 등급 순서입니다.
+    예: upper=S, lower=A+ -> [S, A++, A+]
+    """
+    try:
+        upper_idx = GRADE_ORDER.index(str(upper_grade))
+    except ValueError:
+        upper_idx = 0
+    try:
+        lower_idx = GRADE_ORDER.index(str(lower_grade))
+    except ValueError:
+        lower_idx = len(GRADE_ORDER) - 1
+    start, end = sorted([upper_idx, lower_idx])
+    return GRADE_ORDER[start:end + 1]
+
+
+def format_grade_range_label(upper_grade: str, lower_grade: str) -> str:
+    return f"{upper_grade} ~ {lower_grade}" if upper_grade != lower_grade else str(upper_grade)
 
 DISCOVERY_FOCUS_SORT = {
     "균형형": ["합산점수", "배우화제성"],
@@ -1972,9 +1984,6 @@ DISCOVERY_DISPLAY_COLUMNS = [
     "합산점수", "폭발백분율", "안정백분율", "기여백분율", "배우화제성", "출연작품수", "출연작"
 ]
 
-
-def get_grade_range_options(label: str) -> List[str]:
-    return DISCOVERY_GRADE_RANGES.get(str(label), GRADE_ORDER)
 
 
 def sort_candidates_by_focus(df: pd.DataFrame, focus_metric: str) -> pd.DataFrame:
@@ -2158,7 +2167,7 @@ def call_actor_discovery_ai(system_instruction: str, user_payload: str) -> str:
 
 
 def render_actor_ai_compare_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
-    st.markdown("<div class='overview-section-title'>AI 비교</div>", unsafe_allow_html=True)
+    st.markdown("<div class='detail-section-title'>AI 비교</div>", unsafe_allow_html=True)
     st.caption("배우를 직접 선택하면, 선택 배우의 요약 지표와 전작 요약만 LLM에 전달해 비교합니다.")
 
     actor_options = result_df.sort_values(["합산점수", "배우화제성"], ascending=[False, False])["배우"].tolist()
@@ -2191,9 +2200,6 @@ def render_actor_ai_compare_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
         st.info("비교할 배우를 2명 이상 선택해주세요.")
         return
 
-    with st.expander("LLM 전달 정보 미리보기", expanded=False):
-        payload, _ = build_discovery_compare_payload(raw_df, result_df, selected_names, focus_metric)
-        st.code(payload, language="json")
 
     if st.button("AI 비교 분석 시작", type="primary", use_container_width=True, key="ai_compare_button"):
         prompt = load_actor_discovery_prompt()
@@ -2207,7 +2213,7 @@ def render_actor_ai_compare_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
 
 
 def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
-    st.markdown("<div class='overview-section-title'>AI 탐색</div>", unsafe_allow_html=True)
+    st.markdown("<div class='detail-section-title'>AI 탐색</div>", unsafe_allow_html=True)
     st.caption("조건은 코드가 먼저 필터링하고, 핵심지표는 LLM이 추천 사유를 해석할 때 참고하는 관점으로만 사용합니다.")
 
     c1, c2, c3 = st.columns(3)
@@ -2217,7 +2223,14 @@ def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
         age_options = ["전체"] + sort_age_groups(result_df["연령대"].dropna().astype(str).unique().tolist())
         age_group = st.selectbox("연령대", age_options, index=0, key="ai_explore_age")
     with c3:
-        grade_range = st.selectbox("등급 범위", list(DISCOVERY_GRADE_RANGES.keys()), index=2, key="ai_explore_grade_range")
+        grade_bounds = st.select_slider(
+            "합산등급 범위",
+            options=GRADE_ORDER,
+            value=("S", "A"),
+            key="ai_explore_grade_bounds",
+        )
+        upper_grade, lower_grade = grade_bounds
+        grade_range_label = format_grade_range_label(upper_grade, lower_grade)
 
     c4, c5, c6 = st.columns(3)
     with c4:
@@ -2231,7 +2244,7 @@ def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
     conditions = {
         "성별": gender,
         "연령대": age_group,
-        "등급범위": grade_range,
+        "합산등급범위": grade_range_label,
         "핵심지표": focus_metric,
         "최소출연작품수": min_works_label,
         "AI분석후보수": int(analysis_limit),
@@ -2241,8 +2254,8 @@ def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
         filtered = filtered[filtered["성별"] == gender].copy()
     if age_group != "전체":
         filtered = filtered[filtered["연령대"] == age_group].copy()
-    if grade_range != "전체":
-        filtered = filtered[filtered["합산등급"].isin(get_grade_range_options(grade_range))].copy()
+    allowed_grades = get_grade_range_by_bounds(upper_grade, lower_grade)
+    filtered = filtered[filtered["합산등급"].isin(allowed_grades)].copy()
     min_works = {"전체": 0, "2작품 이상": 2, "3작품 이상": 3, "5작품 이상": 5}.get(min_works_label, 0)
     if min_works > 0:
         filtered = filtered[pd.to_numeric(filtered["출연작품수"], errors="coerce").fillna(0) >= min_works].copy()
@@ -2269,11 +2282,6 @@ def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
         hide_index=True,
         height=420,
     )
-    render_actor_radar(filtered, filtered["배우"].head(min(8, len(filtered))).tolist(), "AI 탐색 후보 · 상대 위치 기준", dynamic_range=True, relative_mode=True)
-
-    with st.expander("LLM 전달 정보 미리보기", expanded=False):
-        payload, _ = build_discovery_explore_payload(raw_df, filtered, conditions, focus_metric, int(analysis_limit))
-        st.code(payload, language="json")
 
     if st.button("AI 후보 분석 시작", type="primary", use_container_width=True, key="ai_explore_button"):
         prompt = load_actor_discovery_prompt()
@@ -2288,90 +2296,13 @@ def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
 
 def render_compare(raw_df: pd.DataFrame, result_df: pd.DataFrame):
     st.markdown("<div class='section-title'>배우 모아보기</div>", unsafe_allow_html=True)
-    tab_ai_compare, tab_ai_explore, tab_group, tab_pair = st.tabs(["AI 비교", "AI 탐색", "그룹 모아보기", "배우 직접 선택 1:1 비교"])
+    tab_ai_compare, tab_ai_explore = st.tabs(["AI 비교", "AI 탐색"])
 
     with tab_ai_compare:
         render_actor_ai_compare_tab(raw_df, result_df)
 
     with tab_ai_explore:
         render_actor_ai_explore_tab(raw_df, result_df)
-
-    with tab_group:
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            selected_gender = st.multiselect("성별", options=["남", "여", "미상"], placeholder="전체")
-        with c2:
-            selected_age_groups = st.multiselect(
-                "연령대",
-                options=sort_age_groups(result_df["연령대"].dropna().astype(str).unique().tolist()),
-                placeholder="전체",
-            )
-        with c3:
-            selected_total_grade = st.multiselect("합산등급", options=GRADE_ORDER, placeholder="전체")
-        with c4:
-            selected_programs = st.multiselect(
-                "작품",
-                options=sorted(raw_df["프로그램명"].dropna().astype(str).unique().tolist()),
-                placeholder="전체",
-            )
-
-        c3, c4, c5 = st.columns(3)
-        with c3:
-            selected_prod_grade = st.multiselect("폭발력등급", options=GRADE_ORDER, placeholder="전체")
-        with c4:
-            selected_stab_grade = st.multiselect("안정성등급", options=GRADE_ORDER, placeholder="전체")
-        with c5:
-            selected_contrib_grade = st.multiselect("기여도등급", options=GRADE_ORDER, placeholder="전체")
-
-        filtered = result_df.copy()
-        if selected_programs:
-            program_actor_names = raw_df[raw_df["프로그램명"].isin(selected_programs)]["인물명"].dropna().astype(str).unique().tolist()
-            filtered = filtered[filtered["배우"].isin(program_actor_names)].copy()
-        if selected_total_grade:
-            filtered = filtered[filtered["합산등급"].isin(selected_total_grade)].copy()
-        if selected_prod_grade:
-            filtered = filtered[filtered["폭발력등급"].isin(selected_prod_grade)].copy()
-        if selected_stab_grade:
-            filtered = filtered[filtered["안정성등급"].isin(selected_stab_grade)].copy()
-        if selected_contrib_grade:
-            filtered = filtered[filtered["기여도등급"].isin(selected_contrib_grade)].copy()
-        if selected_gender:
-            filtered = filtered[filtered["성별"].isin(selected_gender)].copy()
-        if selected_age_groups:
-            filtered = filtered[filtered["연령대"].isin(selected_age_groups)].copy()
-
-        filtered = filtered.sort_values(["합산점수", "배우화제성"], ascending=[False, False]).reset_index(drop=True)
-        st.caption(f"조건 일치 배우 {len(filtered):,}명")
-        if filtered.empty:
-            st.info("조건에 맞는 배우가 없습니다.")
-        else:
-            st.dataframe(
-                filtered[["배우", "성별", "연령대", "합산등급", "폭발력등급", "안정성등급", "기여도등급", "합산점수", "배우화제성", "출연작품수"]]
-                .rename(columns={"합산등급": "합산등급"})
-                .style.format({"합산점수": "{:.2f}", "배우화제성": "{:,.0f}", "출연작품수": "{:,.0f}"}),
-                use_container_width=True,
-                hide_index=True,
-                height=620,
-            )
-            render_actor_radar(filtered, filtered["배우"].head(8).tolist(), "조건 일치 배우 비교 · 상대 위치 기준", dynamic_range=True, relative_mode=True)
-
-    with tab_pair:
-        names = result_df["배우"].tolist()
-        left, right = st.columns(2)
-        with left:
-            actor1 = st.selectbox("배우 1", names, index=0, placeholder="배우명 검색", key="compare_actor_1")
-        with right:
-            default_idx = 1 if len(names) > 1 else 0
-            actor2 = st.selectbox("배우 2", names, index=default_idx, placeholder="배우명 검색", key="compare_actor_2")
-
-        selected_names = [a for a in [actor1, actor2] if a]
-        comp_df = compare_table_rows(result_df, selected_names)
-        st.dataframe(
-            comp_df.style.format({"합산점수": "{:.2f}", "배우화제성": "{:,.0f}", "출연작품수": "{:,.0f}"}),
-            use_container_width=True,
-            hide_index=True,
-        )
-        render_actor_radar(result_df, comp_df["배우"].tolist(), "선택 배우 비교 · 항목별 점수", dynamic_range=True)
 
 
 @lru_cache(maxsize=1)
