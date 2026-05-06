@@ -1475,11 +1475,27 @@ def render_reference():
 <div class='summary-title' style='font-size:1.05rem; color:#111827; margin-bottom:12px;'>💡 폭발력</div>
 <div class='actor-sub' style='line-height: 1.72;'>
 <span style='color:#6b7280; font-size:0.85rem; font-weight:700;'>정의</span><br>
-<b>한 배우가 만들어낼 수 있는 최고 수준의 화제 확장력과, 대표작 외 작품들까지 포함한 재현 가능성을 함께 반영한 지표</b><br><br>
-폭발력은 단순히 <b>가장 잘된 작품 하나</b>만 보는 지표가 아닙니다. 최고 성과를 낸 대표작의 존재감은 반영하되, 나머지 작품에서도 일정 수준 이상의 성과를 만들 수 있는지를 함께 봅니다. 즉, <b>"한 번 크게 터진 배우"인지, "고점을 만들면서도 평균 체급이 받쳐주는 배우"인지</b>를 구분하려는 목적입니다.
+<b>한 배우가 만들어낼 수 있는 최고 수준의 화제 확장력</b><br><br>
+최고 성과를 낸 대표작의 존재감은 반영하되, 나머지 작품에서도 일정 수준 이상의 성과를 만들 수 있는지를 함께 측정하여 우연의 개입을 보정합니다.
 <div class='formula-box'>
-<b style='color:#0f172a; font-size:1rem;'>폭발력</b> = 폭발력지수의 전체 백분위<br><br>
-<b style='color:#0f172a;'>폭발력지수</b> = 0.5 × 대표작성과백분위 + 0.5 × 최하제외평균백분위
+<b style='color:#0f172a; font-size:1rem;'>폭발력지수</b> =<br>
+&nbsp;&nbsp;출연작품수 = 1인 경우:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;0.5 × 대표작성과백분위 × 0.75<br>
+&nbsp;&nbsp;&nbsp;&nbsp;+ 0.5 × 최하제외평균백분위<br><br>
+&nbsp;&nbsp;출연작품수 ≥ 2인 경우:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;0.5 × 대표작성과백분위<br>
+&nbsp;&nbsp;&nbsp;&nbsp;+ 0.5 × 최하제외평균백분위<br><br>
+
+<b style='color:#0f172a;'>대표작성과백분위</b> = 대표작성과의 전체 백분위<br>
+<b style='color:#0f172a;'>대표작성과</b> = MAX(작품별 주평균 배우화제성)<br>
+<b style='color:#0f172a;'>작품별 주평균 배우화제성</b> = 작품별 배우화제성 ÷ 랭크인주차<br><br>
+
+<b style='color:#0f172a;'>최하제외평균백분위</b> = 최하제외평균의 전체 백분위<br>
+<b style='color:#0f172a;'>최하제외평균</b> =<br>
+&nbsp;&nbsp;출연작품수 ≤ 2인 경우: 작품 주평균<br>
+&nbsp;&nbsp;출연작품수 ≥ 3인 경우: (주평균 배우화제성합 - 최하작 성과) ÷ (출연작품수 - 1)<br><br>
+
+<b style='color:#0f172a;'>폭발력 백분율</b> = 폭발력지수의 전체 백분위
 </div>
 <span style='color:#6b7280; font-size:0.85rem; font-weight:700;'>세부 항목</span>
 <ul style='margin-top:6px; padding-left:22px; color:#475569; font-size:0.9rem; line-height:1.68;'>
@@ -1501,12 +1517,32 @@ def render_reference():
 <span style='color:#6b7280; font-size:0.85rem; font-weight:700;'>정의</span><br>
 <b>여러 작품에서 얼마나 꾸준히 성과를 냈는지</b> (보정 작품평균, 히트 분산 보정, 작품수 보정, 대표작 성과를 함께 반영)
 <div class='formula-box'>
-<b style='color:#0f172a; font-size:1rem;'>안정성</b> = 꾸준함지수의 전체 백분위<br><br>
-<b style='color:#0f172a;'>꾸준함지수</b> = MIN(1,<br>
+<b style='color:#0f172a; font-size:1rem;'>안정성지수</b> = MIN(1,<br>
 &nbsp;&nbsp;0.25 × 보정작품평균정규화<br>
-&nbsp;&nbsp;+ 0.55 × (0.7 × 히트분산정규화 + 0.3 × 작품수보정)<br>
-&nbsp;&nbsp;+ 0.20 × (대표작성과백분위³)<br>
-)
+&nbsp;&nbsp;+ 0.55 × (<br>
+&nbsp;&nbsp;&nbsp;&nbsp;0.7 × 히트분산정규화<br>
+&nbsp;&nbsp;&nbsp;&nbsp;+ 0.3 × 작품수보정<br>
+&nbsp;&nbsp;)<br>
+&nbsp;&nbsp;+ 0.20 × 대표작성과백분위³<br>
+)<br><br>
+
+<b style='color:#0f172a;'>보정작품평균정규화</b> =<br>
+&nbsp;&nbsp;(보정작품평균 - 최소 보정작품평균)<br>
+&nbsp;&nbsp;÷ (최대 보정작품평균 - 최소 보정작품평균)<br><br>
+
+<b style='color:#0f172a;'>보정작품평균</b> =<br>
+&nbsp;&nbsp;(배우화제성 + 3 × 전체 작품평균 평균)<br>
+&nbsp;&nbsp;÷ (출연작품수 + 3)<br><br>
+
+<b style='color:#0f172a;'>히트분산정규화</b> =<br>
+&nbsp;&nbsp;(히트분산지수 - 최소 히트분산지수)<br>
+&nbsp;&nbsp;÷ (최대 히트분산지수 - 최소 히트분산지수)<br><br>
+
+<b style='color:#0f172a;'>히트분산지수</b> = 1 - (대표작성과 ÷ 배우화제성)<br>
+<b style='color:#0f172a;'>작품수보정</b> = 출연작품수 ÷ (출연작품수 + 2)<br>
+<b style='color:#0f172a;'>대표작성과백분위</b> = 대표작성과의 전체 백분위<br><br>
+
+<b style='color:#0f172a;'>안정성 백분율</b> = 안정성지수의 전체 백분위
 </div>
 <span style='color:#6b7280; font-size:0.85rem; font-weight:700;'>세부 항목</span>
 <ul style='margin-top:6px; padding-left:22px; color:#475569; font-size:0.9rem; line-height:1.68;'>
@@ -1530,11 +1566,25 @@ def render_reference():
 <span style='color:#6b7280; font-size:0.85rem; font-weight:700;'>정의</span><br>
 <b>작품 전체 성과 안에서 얼마나 중심적인 존재감을 보였는지</b> (작은 작품의 과대평가를 막기 위해 작품 체급 보정 추가 적용)
 <div class='formula-box'>
-<b style='color:#0f172a; font-size:1rem;'>기여도</b> = 최종기여도의 전체 백분위<br><br>
-<b style='color:#0f172a;'>최종기여도</b> = 보정기여도 × 작품체급보정<br><br>
-<b style='color:#0f172a;'>보정기여도</b> =<br>
+<b style='color:#0f172a; font-size:1rem;'>기여도지수</b> = 기본기여도 × 작품체급보정<br><br>
+
+<b style='color:#0f172a;'>기본기여도</b> =<br>
 &nbsp;&nbsp;0.5 × 보정작품평균정규화<br>
-&nbsp;&nbsp;+ 0.5 × (화제성기여도 × (1위배율 + 2위배율 + 3위배율))
+&nbsp;&nbsp;+ 0.5 × (<br>
+&nbsp;&nbsp;&nbsp;&nbsp;화제성기여도<br>
+&nbsp;&nbsp;&nbsp;&nbsp;× (1위배율 + 2위배율 + 3위배율)<br>
+&nbsp;&nbsp;)<br><br>
+
+<b style='color:#0f172a;'>화제성기여도</b> = 배우화제성 ÷ 드라마화제성<br><br>
+
+<b style='color:#0f172a;'>1위배율</b> = 작품내 1위 횟수 ÷ 출연작품수 × 1.0<br>
+<b style='color:#0f172a;'>2위배율</b> = 작품내 2위 횟수 ÷ 출연작품수 × 0.5<br>
+<b style='color:#0f172a;'>3위배율</b> = 작품내 3위 횟수 ÷ 출연작품수 × 0.3<br><br>
+
+<b style='color:#0f172a;'>작품체급보정</b> = 0.45 + 0.55 × 작품체급백분위<br>
+<b style='color:#0f172a;'>작품체급백분위</b> = 드라마화제성의 전체 백분위<br><br>
+
+<b style='color:#0f172a;'>기여도 백분율</b> = 기여도지수의 전체 백분위
 </div>
 <span style='color:#6b7280; font-size:0.85rem; font-weight:700;'>세부 항목</span>
 <ul style='margin-top:6px; padding-left:22px; color:#475569; font-size:0.9rem; line-height:1.68;'>
@@ -1636,7 +1686,7 @@ def render_overview(raw_df: pd.DataFrame, result_df: pd.DataFrame):
     with c1:
         metric_card("전체 배우", format_int(total_actors), "분석 대상 배우 수")
     with c2:
-        metric_card("전체 작품", format_int(total_programs), "RAW 기준 프로그램 수")
+        metric_card("전체 작품", format_int(total_programs), "대상 프로그램 수")
     with c3:
         metric_card("현재 1위 배우", top1["배우"], f"합산점수 {format_score(top1['합산점수'])}")
 
@@ -1649,7 +1699,6 @@ def render_overview(raw_df: pd.DataFrame, result_df: pd.DataFrame):
 
     st.markdown("<div class='overview-line-section'>", unsafe_allow_html=True)
     st.markdown("<div class='overview-parent-title'>성별별 Top 10</div>", unsafe_allow_html=True)
-    st.markdown("<div class='overview-parent-sub'>성별을 상위 카테고리로 두고, 각 그룹의 상위 배우를 보여줍니다.</div>", unsafe_allow_html=True)
     gender_left, gender_right = st.columns(2)
     with gender_left:
         st.markdown("<div class='overview-child-title'>남배우 Top 10</div>", unsafe_allow_html=True)
@@ -1669,7 +1718,6 @@ def render_overview(raw_df: pd.DataFrame, result_df: pd.DataFrame):
 
     st.markdown("<div class='overview-line-section'>", unsafe_allow_html=True)
     st.markdown("<div class='overview-parent-title'>연령대별 Top 10</div>", unsafe_allow_html=True)
-    st.markdown("<div class='overview-parent-sub'>연령대를 상위 카테고리로 두고, 각 그룹의 상위 배우를 보여줍니다.</div>", unsafe_allow_html=True)
     age_cols = st.columns(2)
     for i, age_group in enumerate(AGE_GROUP_ORDER):
         with age_cols[i % 2]:
