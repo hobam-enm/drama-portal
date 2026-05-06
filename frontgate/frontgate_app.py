@@ -924,7 +924,19 @@ def update_user_access(actor_user: Dict[str, Any], user_id: str, allowed_apps: L
     desired_role = normalize_role(role if role is not None else target_user.get("role"), target_user.get("name"))
     if not can_manage_role(actor_user, desired_role, target_user.get("name")):
         return False, "현재 권한으로는 해당 권한 등급으로 변경할 수 없습니다."
-    update_doc = {"allowed_apps": list(allowed_apps or [])}
+    # 마스터는 전체 앱 권한을 그대로 저장합니다.
+    # 일반 admin은 본인이 부여 가능한 앱만 수정하고,
+    # 본인이 관리할 수 없는 기존 앱 권한은 보존합니다.
+    if is_master(actor_user):
+        final_allowed_apps = list(allowed_apps or [])
+    else:
+        grantable = set(grantable_app_keys(actor_user))
+        existing_apps = set(target_user.get("allowed_apps") or [])
+        preserved_apps = [app for app in existing_apps if app not in grantable]
+        selected_grantable_apps = [app for app in list(allowed_apps or []) if app in grantable]
+        final_allowed_apps = list(dict.fromkeys(preserved_apps + selected_grantable_apps))
+
+    update_doc = {"allowed_apps": final_allowed_apps}
     if role is not None:
         update_doc["role"] = desired_role
     if permissions is not None:
@@ -1040,6 +1052,22 @@ def visible_app_keys(user: Optional[Dict[str, Any]] = None, include_frontgate: b
     if not include_frontgate:
         keys = [k for k in keys if k != "frontgate"]
     return keys
+
+
+def grantable_app_keys(user: Optional[Dict[str, Any]], include_frontgate: bool = False) -> List[str]:
+    """관리자가 다른 사용자에게 부여할 수 있는 앱 목록을 반환합니다.
+
+    - 마스터: 등록된 모든 앱 권한 부여 가능
+    - 일반 admin: 본인이 allowed_apps로 이미 보유한 앱만 부여 가능
+      예) actor_dashboard 권한을 받은 admin만 다른 사람에게 actor_dashboard 권한 부여 가능
+    """
+    keys = visible_app_keys(user, include_frontgate=include_frontgate)
+    if not user:
+        return []
+    if is_master(user):
+        return keys
+    owned = set(user.get("allowed_apps") or [])
+    return [k for k in keys if k in owned]
 
 
 def app_images() -> Dict[str, str]:
@@ -1313,11 +1341,15 @@ def assignable_role_options(actor_user: Dict[str, Any], target_user: Optional[Di
 def render_admin_panel(admin_user: Dict[str, Any], page: str):
     st.markdown("### 🛠 관리자 페이지")
 
-    # 모든 서비스 권한을 조회/부여할 수 있습니다.
-    # 실제 서비스 진입은 사용자별 allowed_apps 값으로 통제됩니다.
-    app_keys = visible_app_keys(admin_user)
+    # 권한 부여 가능 서비스:
+    # - 마스터: 전체 서비스
+    # - 일반 admin: 본인이 이미 접근 권한을 가진 서비스만 다른 사람에게 부여 가능
+    app_keys = grantable_app_keys(admin_user)
     app_labels = {k: app_meta(k)["title"] for k in app_keys}
     permission_options = ["user_manage", "approve_signup", "session_manage", "ytan_admin"]
+
+    if not app_keys and not is_master(admin_user):
+        st.info("현재 계정에 부여된 서비스 접근 권한이 없어 다른 사용자에게 부여할 수 있는 앱 권한이 없습니다.")
 
     if page == "signup_requests":
         st.caption("가입 요청 검토 및 승인")
