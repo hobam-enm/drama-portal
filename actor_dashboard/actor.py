@@ -1,6 +1,8 @@
 import math
 import re
 import textwrap
+import sys
+import os
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote
@@ -16,6 +18,33 @@ import streamlit as st
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="배우 다차원 화제성 지표 - 드라마", layout="wide")
+
+
+# =====================================================
+#region [ 인증/쿠키 게이트 ]
+
+# ===== 1. 통합 포털 경로 추가 =====
+# 현재 파일(actor_dashboard.py) 위치를 기준으로 상위 폴더(레포지토리 루트)를 파이썬 경로에 추가합니다.
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
+
+# ===== 2. 통합 포털 인증 게이트 =====
+# Dashboard.py와 동일한 방식으로 frontgate의 공통 인증 모듈을 사용합니다.
+from frontgate.auth_utils import check_auth
+
+current_user = check_auth("actor_dashboard")
+
+
+def _rerun():
+    if hasattr(st, "rerun"):
+        st.rerun()
+    else:
+        st.experimental_rerun()
+
+#endregion
+# =====================================================
 
 RAW_REQUIRED_COLUMNS = [
     "인물명",
@@ -450,6 +479,18 @@ def get_secret_section(name: str) -> Dict:
         return {}
 
 
+def get_actor_data_cfg() -> Dict:
+    """
+    배우 대시보드 데이터 설정을 읽습니다.
+    - 우선 [actor_dashboard] 섹션을 사용합니다.
+    - 기존 배포 호환을 위해 [data] 섹션도 fallback으로 허용합니다.
+    """
+    cfg = get_secret_section("actor_dashboard")
+    if cfg:
+        return cfg
+    return get_secret_section("data")
+
+
 def get_gspread_client():
     sa = get_secret_section("gcp_service_account")
     if not sa:
@@ -497,9 +538,9 @@ def sort_age_groups(values: List[str]) -> List[str]:
 
 @st.cache_data(ttl=600)
 def load_actor_meta_from_gsheet() -> pd.DataFrame:
-    data_cfg = get_secret_section("data")
-    spreadsheet_id = data_cfg.get("spreadsheet_id", "").strip()
-    actor_sheet = data_cfg.get("actor_list_sheet", "배우리스트").strip() or "배우리스트"
+    data_cfg = get_actor_data_cfg()
+    spreadsheet_id = data_cfg.get("spreadsheet_id", data_cfg.get("sheet_id", "")).strip()
+    actor_sheet = data_cfg.get("actor_list_sheet", data_cfg.get("actor_meta_sheet_name", "배우리스트")).strip() or "배우리스트"
     if not spreadsheet_id:
         return pd.DataFrame(columns=["배우", "성별", "출생연도", "연령", "연령대"])
 
@@ -558,9 +599,9 @@ def merge_actor_meta(result_df: pd.DataFrame, actor_meta_df: pd.DataFrame) -> pd
 
 @st.cache_data(ttl=600)
 def load_raw_from_gsheet() -> pd.DataFrame:
-    data_cfg = get_secret_section("data")
-    spreadsheet_id = data_cfg.get("spreadsheet_id", "").strip()
-    raw_sheet = data_cfg.get("raw_sheet", "RAW").strip() or "RAW"
+    data_cfg = get_actor_data_cfg()
+    spreadsheet_id = data_cfg.get("spreadsheet_id", data_cfg.get("sheet_id", "")).strip()
+    raw_sheet = data_cfg.get("raw_sheet", data_cfg.get("sheet_name", "RAW")).strip() or "RAW"
     if not spreadsheet_id:
         st.error("Secrets의 [data].spreadsheet_id 값이 없습니다.")
         st.stop()
