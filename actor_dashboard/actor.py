@@ -390,12 +390,13 @@ def inject_css():
             box-shadow: none;
             padding: 0;
         }
+        /* Overview는 큰 외곽 박스 없이 콘텐츠만 배치합니다. */
         div[data-testid="stVerticalBlockBorderWrapper"]:has(.overview-section-title) {
-            background: linear-gradient(180deg, #ffffff 0%, #fafcff 100%);
-            border: 1px solid #e7ebf3;
-            border-radius: 24px;
-            box-shadow: 0 10px 28px rgba(31,41,55,0.05);
-            padding: 8px 10px;
+            background: transparent;
+            border: none;
+            border-radius: 0;
+            box-shadow: none;
+            padding: 0;
         }
         .overview-section-title {
             font-size: 1.18rem;
@@ -1739,10 +1740,9 @@ def render_overview(raw_df: pd.DataFrame, result_df: pd.DataFrame):
 
     st.markdown("<div class='spacer-md'></div>", unsafe_allow_html=True)
     heatmap_fig = build_overview_demo_figures(result_df)
-    with st.container(border=True):
-        st.markdown("<div class='overview-section-title'>등급별 성·연령 구성</div>", unsafe_allow_html=True)
-        st.markdown("<div class='overview-section-sub'>각 등급 안에서 어떤 성·연령 집단 비중이 큰지 색상 진하기로 보여줍니다.</div>", unsafe_allow_html=True)
-        st.plotly_chart(heatmap_fig, use_container_width=True)
+    st.markdown("<div class='overview-section-title'>등급별 성·연령 구성</div>", unsafe_allow_html=True)
+    st.markdown("<div class='overview-section-sub'>각 등급 안에서 어떤 성·연령 집단 비중이 큰지 색상 진하기로 보여줍니다.</div>", unsafe_allow_html=True)
+    st.plotly_chart(heatmap_fig, use_container_width=True)
 
     st.markdown("<div class='overview-line-section'>", unsafe_allow_html=True)
     st.markdown("<div class='overview-parent-title'>성별별 Top 10</div>", unsafe_allow_html=True)
