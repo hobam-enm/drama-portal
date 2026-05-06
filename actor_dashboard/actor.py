@@ -867,8 +867,26 @@ def update_query_params_if_changed(**updates):
         return False
 
 
+TRANSIENT_AUTH_QUERY_KEYS = {
+    "auth",
+    "handoff",
+    "handoff_token",
+    "token",
+    "session",
+    "session_token",
+}
+
+
 def build_query_href(**updates) -> str:
     params = _current_query_params_dict()
+
+    # frontgate에서 넘어올 때 붙는 일회성 인증/핸드오프 파라미터는
+    # 내부 배우 링크에 계속 실어 나르지 않습니다.
+    # 이미 앱 안에 들어온 뒤에는 cookie/localStorage/Mongo session으로 인증을 확인하므로,
+    # auth 파라미터를 보존하면 링크 클릭 때마다 인증 게이트가 다시 반짝일 수 있습니다.
+    for k in TRANSIENT_AUTH_QUERY_KEYS:
+        params.pop(k, None)
+
     for k, v in updates.items():
         if v is None:
             params.pop(k, None)
@@ -1711,11 +1729,9 @@ def render_detail(raw_df: pd.DataFrame, result_df: pd.DataFrame):
         st.session_state["detail_selected_actor"] = initial_actor
         st.session_state["_detail_query_actor_synced"] = initial_actor
 
-    default_index = names.index(st.session_state["detail_selected_actor"]) if st.session_state.get("detail_selected_actor") in names else 0
     selected_actor = st.selectbox(
         "배우 선택",
         names,
-        index=default_index,
         key="detail_selected_actor",
         placeholder="배우명을 검색해 선택",
     )
@@ -2251,8 +2267,7 @@ def main():
             st.session_state["sidebar_page"] = initial_page
             st.session_state["_sidebar_query_page_synced"] = initial_page
 
-        default_page_index = page_options.index(st.session_state["sidebar_page"])
-        page = st.radio("", page_options, index=default_page_index, key="sidebar_page", label_visibility="collapsed")
+        page = st.radio("", page_options, key="sidebar_page", label_visibility="collapsed")
 
         update_query_params_if_changed(page=page)
         st.session_state["_sidebar_query_page_synced"] = page
