@@ -1602,65 +1602,62 @@ def render_reference():
 
     st.markdown(
         """
-        <div class='card'>
-            <div class='rep-title'>등급 컷 기준</div>
-            <div class='actor-sub' style='line-height:1.72;'>
-                <span style='color:#6b7280; font-size:0.85rem; font-weight:700;'>기준</span><br>
-                전체 배우의 <b>백분위 위치</b>를 기준으로 등급을 구분합니다.
-            </div>
+<div class='card'>
+<div class='rep-title'>등급 컷 기준</div>
+<div class='actor-sub' style='line-height:1.72;'>
+<span style='color:#6b7280; font-size:0.85rem; font-weight:700;'>기준</span><br>
+전체 배우의 <b>백분위 위치</b>를 기준으로 등급을 구분합니다.
+</div>
 
-            <div style='height:14px;'></div>
+<div style='height:14px;'></div>
 
-            <div style='background:#f8fafc; border:1px solid #e5e7eb; border-radius:18px; padding:18px 18px 16px 18px;'>
+<div style='background:#f8fafc; border:1px solid #e5e7eb; border-radius:18px; padding:18px 18px 16px 18px;'>
 
-                <!-- 등급 바 -->
-                <div style='display:flex; width:100%; height:28px; border-radius:999px; overflow:hidden; box-shadow: inset 0 0 0 1px rgba(15,23,42,0.06);'>
-                    <div style='width:5%; background:linear-gradient(90deg, #ffe6e1 0%, #ffd0ca 100%);'></div>
-                    <div style='width:10%; background:linear-gradient(90deg, #ff9d93 0%, #f45b49 100%);'></div>
-                    <div style='width:15%; background:linear-gradient(90deg, #ffb15b 0%, #ef7d1a 100%);'></div>
-                    <div style='width:20%; background:linear-gradient(90deg, #dff7f1 0%, #b7efe3 100%);'></div>
-                    <div style='width:20%; background:linear-gradient(90deg, #57d7c0 0%, #24baa1 100%);'></div>
-                    <div style='width:15%; background:linear-gradient(90deg, #18b69d 0%, #0b8f7c 100%);'></div>
-                    <div style='width:5%; background:linear-gradient(90deg, #c8d7ff 0%, #9ab7ff 100%);'></div>
-                    <div style='width:6%; background:linear-gradient(90deg, #7096ff 0%, #3f74ff 100%);'></div>
-                    <div style='width:2%; background:linear-gradient(90deg, #426cff 0%, #1747d1 100%);'></div>
-                    <div style='width:2%; background:linear-gradient(90deg, #9a66ff 0%, #7a3cff 100%);'></div>
-                </div>
+<div style='display:flex; width:100%; height:28px; border-radius:999px; overflow:hidden; box-shadow: inset 0 0 0 1px rgba(15,23,42,0.06);'>
+<div style='width:5%; background:linear-gradient(90deg, #ffe6e1 0%, #ffd0ca 100%);'></div>
+<div style='width:10%; background:linear-gradient(90deg, #ff9d93 0%, #f45b49 100%);'></div>
+<div style='width:15%; background:linear-gradient(90deg, #ffb15b 0%, #ef7d1a 100%);'></div>
+<div style='width:20%; background:linear-gradient(90deg, #dff7f1 0%, #b7efe3 100%);'></div>
+<div style='width:20%; background:linear-gradient(90deg, #57d7c0 0%, #24baa1 100%);'></div>
+<div style='width:15%; background:linear-gradient(90deg, #18b69d 0%, #0b8f7c 100%);'></div>
+<div style='width:5%; background:linear-gradient(90deg, #c8d7ff 0%, #9ab7ff 100%);'></div>
+<div style='width:6%; background:linear-gradient(90deg, #7096ff 0%, #3f74ff 100%);'></div>
+<div style='width:2%; background:linear-gradient(90deg, #426cff 0%, #1747d1 100%);'></div>
+<div style='width:2%; background:linear-gradient(90deg, #9a66ff 0%, #7a3cff 100%);'></div>
+</div>
 
-                <!-- 등급명 -->
-                <div style='display:flex; width:100%; margin-top:10px; font-size:0.78rem; font-weight:800; color:#334155;'>
-                    <div style='width:5%; text-align:left;'>C</div>
-                    <div style='width:10%; text-align:center;'>C+</div>
-                    <div style='width:15%; text-align:center;'>C++</div>
-                    <div style='width:20%; text-align:center;'>B</div>
-                    <div style='width:20%; text-align:center;'>B+</div>
-                    <div style='width:15%; text-align:center;'>B++</div>
-                    <div style='width:5%; text-align:center;'>A</div>
-                    <div style='width:6%; text-align:center;'>A+</div>
-                    <div style='width:2%; text-align:center;'>A++</div>
-                    <div style='width:2%; text-align:right;'>S</div>
-                </div>
+<div style='display:flex; width:100%; margin-top:10px; font-size:0.78rem; font-weight:800; color:#334155;'>
+<div style='width:5%; text-align:left;'>C</div>
+<div style='width:10%; text-align:center;'>C+</div>
+<div style='width:15%; text-align:center;'>C++</div>
+<div style='width:20%; text-align:center;'>B</div>
+<div style='width:20%; text-align:center;'>B+</div>
+<div style='width:15%; text-align:center;'>B++</div>
+<div style='width:5%; text-align:center;'>A</div>
+<div style='width:6%; text-align:center;'>A+</div>
+<div style='width:2%; text-align:center;'>A++</div>
+<div style='width:2%; text-align:right;'>S</div>
+</div>
 
-                <!-- 컷 기준 -->
-                <div style='display:flex; width:100%; margin-top:8px; font-size:0.74rem; color:#64748b;'>
-                    <div style='width:5%; text-align:left;'>0</div>
-                    <div style='width:10%; text-align:center;'>5</div>
-                    <div style='width:15%; text-align:center;'>15</div>
-                    <div style='width:20%; text-align:center;'>30</div>
-                    <div style='width:20%; text-align:center;'>50</div>
-                    <div style='width:15%; text-align:center;'>70</div>
-                    <div style='width:5%; text-align:center;'>85</div>
-                    <div style='width:6%; text-align:center;'>90</div>
-                    <div style='width:2%; text-align:center;'>96</div>
-                    <div style='width:2%; text-align:right;'>98↑</div>
-                </div>
+<div style='display:flex; width:100%; margin-top:8px; font-size:0.74rem; color:#64748b;'>
+<div style='width:5%; text-align:left;'>0</div>
+<div style='width:10%; text-align:center;'>5</div>
+<div style='width:15%; text-align:center;'>15</div>
+<div style='width:20%; text-align:center;'>30</div>
+<div style='width:20%; text-align:center;'>50</div>
+<div style='width:15%; text-align:center;'>70</div>
+<div style='width:5%; text-align:center;'>85</div>
+<div style='width:6%; text-align:center;'>90</div>
+<div style='width:2%; text-align:center;'>96</div>
+<div style='width:2%; text-align:right;'>98↑</div>
+</div>
 
-                <div style='margin-top:14px; font-size:0.84rem; color:#64748b; line-height:1.65;'>
-                    예: <b>A+</b>는 <b>상위 90% 이상</b>, <b>S</b>는 <b>상위 98% 이상</b>을 의미합니다.
-                </div>
-            </div>
-        </div>
-        """,
+<div style='margin-top:14px; font-size:0.84rem; color:#64748b; line-height:1.65;'>
+예: <b>A+</b>는 <b>상위 90% 이상</b>, <b>S</b>는 <b>상위 98% 이상</b>을 의미합니다.
+</div>
+</div>
+</div>
+""",
         unsafe_allow_html=True,
     )
 
