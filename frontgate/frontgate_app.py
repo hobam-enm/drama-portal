@@ -1029,20 +1029,17 @@ def apps_config() -> Dict[str, str]:
     return dict(sget("apps", default={}) or {})
 
 
-# frontgate에는 URL을 등록하되, 아래 앱은 마스터 계정에게만 노출합니다.
-# - actor_dashboard: 공개 전 내부 테스트/운영자 검수용
-MASTER_ONLY_APPS = {"actor_dashboard"}
+# 모든 서비스 카드는 포털/가입요청/승인 화면에 노출합니다.
+# 실제 접속 가능 여부는 각 사용자의 allowed_apps 권한으로만 판단합니다.
+# 단, 마스터는 운영 편의를 위해 모든 앱에 접근 가능합니다.
+MASTER_ONLY_APPS: set[str] = set()
 
 
 def visible_app_keys(user: Optional[Dict[str, Any]] = None, include_frontgate: bool = False) -> List[str]:
     keys = list(apps_config().keys())
     if not include_frontgate:
         keys = [k for k in keys if k != "frontgate"]
-
-    if user is not None and is_master(user):
-        return keys
-
-    return [k for k in keys if k not in MASTER_ONLY_APPS]
+    return keys
 
 
 def app_images() -> Dict[str, str]:
@@ -1081,16 +1078,15 @@ def build_cards_html(user: Dict[str, Any], keys: List[str]) -> str:
     url_map = apps_config()
 
     for key in keys:
-        if key in MASTER_ONLY_APPS and not is_master(user):
-            continue
-
         url = str(url_map.get(key) or "").strip()
         if not url:
             continue
         meta = app_meta(key)
         img = str(img_map.get(key) or "https://images.unsplash.com/photo-1507842217343-583bb7270b66")
 
-        can_access = is_admin(user) or (key in allowed)
+        # 실제 서비스 진입은 allowed_apps에 권한이 있는 사용자만 허용합니다.
+        # 마스터는 예외적으로 전체 서비스 접근 가능.
+        can_access = is_master(user) or (key in allowed)
         public_apps = {"ip_briefing", "insightlab"}
         needs_auth_handoff = key not in public_apps
         final_url = (
@@ -1274,7 +1270,7 @@ def render_login_panel():
 
 def render_signup_panel():
     st.markdown("### 📨 권한 요청")
-    # 가입/권한 요청 화면에서는 마스터 전용 앱을 노출하지 않습니다.
+    # 가입/권한 요청 화면에는 모든 신청 가능 서비스를 노출합니다.
     app_keys = visible_app_keys(None)
     labels = {k: app_meta(k)["title"] for k in app_keys}
     with st.form("signup_request_form", clear_on_submit=True):
@@ -1317,7 +1313,8 @@ def assignable_role_options(actor_user: Dict[str, Any], target_user: Optional[Di
 def render_admin_panel(admin_user: Dict[str, Any], page: str):
     st.markdown("### 🛠 관리자 페이지")
 
-    # 마스터만 actor_dashboard 권한을 조회/부여할 수 있게 제한합니다.
+    # 모든 서비스 권한을 조회/부여할 수 있습니다.
+    # 실제 서비스 진입은 사용자별 allowed_apps 값으로 통제됩니다.
     app_keys = visible_app_keys(admin_user)
     app_labels = {k: app_meta(k)["title"] for k in app_keys}
     permission_options = ["user_manage", "approve_signup", "session_manage", "ytan_admin"]
@@ -1425,6 +1422,24 @@ def render_admin_panel(admin_user: Dict[str, Any], page: str):
                 (st.success if ok else st.error)(msg)
                 if ok:
                     st.rerun()
+
+        member_search = st.text_input(
+            "멤버 검색",
+            placeholder="이름, 아이디, 부서, 이메일로 검색",
+            key="member_management_search",
+        ).strip().lower()
+
+        if member_search:
+            users = [
+                u for u in users
+                if member_search in str(u.get("name") or "").lower()
+                or member_search in str(u.get("id") or "").lower()
+                or member_search in str(u.get("department") or "").lower()
+                or member_search in str(u.get("email") or "").lower()
+            ]
+            st.caption(f"검색 결과: {len(users)}명")
+            if not users:
+                st.info("검색 조건에 맞는 사용자가 없습니다.")
 
         for u in users:
             uid = str(u.get("id"))
