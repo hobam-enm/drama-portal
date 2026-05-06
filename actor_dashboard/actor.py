@@ -375,7 +375,19 @@ def inject_css():
             box-shadow: 0 10px 28px rgba(31,41,55,0.05);
             margin-top: 14px;
         }
+        /*
+         * Streamlit의 기본 vertical block wrapper 전체에 카드 스타일을 주면
+         * columns / 내부 block까지 전부 박스로 감싸져서 "박스 안에 박스"처럼 보일 수 있습니다.
+         * 기본 wrapper는 투명 처리하고, 실제로 박스가 필요한 섹션만 선택적으로 스타일링합니다.
+         */
         div[data-testid="stVerticalBlockBorderWrapper"] {
+            background: transparent;
+            border: none;
+            border-radius: 0;
+            box-shadow: none;
+            padding: 0;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.overview-section-title) {
             background: linear-gradient(180deg, #ffffff 0%, #fafcff 100%);
             border: 1px solid #e7ebf3;
             border-radius: 24px;
