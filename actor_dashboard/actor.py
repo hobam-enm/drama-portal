@@ -2190,7 +2190,7 @@ def render_actor_ai_compare_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
     project_summary = st.text_area(
         "작품 한줄요약",
         value="",
-        placeholder="예: 로맨스릴러 드라마 / 밤티재질 유치한 로맨스코미디",
+        placeholder="예: 30대 여성 타깃의 현실 공감형 로맨스 드라마",
         height=72,
         key="ai_compare_project_summary",
         help="선택 배우를 비교할 때 장르·톤·기획 방향 적합성을 함께 보도록 LLM에 전달합니다.",
