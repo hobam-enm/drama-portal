@@ -1,3 +1,4 @@
+import json
 import math
 import re
 import textwrap
@@ -100,6 +101,7 @@ AGE_GROUP_ORDER = ["20대", "30대", "40대", "50대"]
 CURRENT_YEAR = 2026
 
 ACTOR_COMBO_PROMPT_FILE = "actor_combo_prompt_updated.md"
+ACTOR_DISCOVERY_PROMPT_FILE = "actor_discovery_prompt.md"
 DEFAULT_ACTOR_COMBO_PROMPT = r"""역할: 너는 드라마 캐스팅 전략과 마케팅 구조를 함께 해석하는 콘텐츠/편성 전략 분석가다.
 
 목표: 입력된 배우들의 다차원 화제성 등급 정보를 바탕으로, 개별 배우의 단순 나열이 아니라 "배우 조합 구조"를 분석해 캐스팅 관점에서의 강점, 보완점, 시너지 구조를 실무형 코멘트로 정리한다.
@@ -475,6 +477,31 @@ def inject_css():
         .actor-combo-report ul {margin:0; padding-left:1.2rem;}
         .actor-combo-report li {margin:0 0 10px 0; color:#374151; line-height:1.75;}
         .actor-combo-report .section-summary {
+            margin: 10px 0 0 0; padding:12px 14px; border-radius:14px;
+            background:#f7faff; color:#24324a; font-size:0.92rem; line-height:1.75; font-weight:700;
+        }
+
+        .actor-discovery-box {
+            background: linear-gradient(180deg, #ffffff 0%, #fafcff 100%);
+            border: 1px solid #e7ebf3;
+            border-radius: 22px;
+            padding: 18px 18px;
+            box-shadow: 0 8px 22px rgba(31,41,55,0.04);
+            margin-top: 12px;
+        }
+        .actor-discovery-report {display:flex; flex-direction:column; gap:14px;}
+        .actor-discovery-report .discovery-section {
+            background:#fff; border:1px solid #e7ebf3; border-radius:18px; padding:16px 18px;
+            box-shadow: 0 6px 18px rgba(31,41,55,0.04);
+        }
+        .actor-discovery-report .discovery-section.total {
+            border: 1.5px solid #bfd1ff;
+            box-shadow: 0 8px 22px rgba(36,86,255,0.08);
+        }
+        .actor-discovery-report h3 {font-size:1.02rem; font-weight:900; color:#172033; margin:0 0 10px 0;}
+        .actor-discovery-report ul {margin:0; padding-left:1.2rem;}
+        .actor-discovery-report li {margin:0 0 10px 0; color:#374151; line-height:1.75;}
+        .actor-discovery-report .section-summary {
             margin: 10px 0 0 0; padding:12px 14px; border-radius:14px;
             background:#f7faff; color:#24324a; font-size:0.92rem; line-height:1.75; font-weight:700;
         }
@@ -1915,9 +1942,359 @@ def render_actor_radar(result_df: pd.DataFrame, chart_names: List[str], title: s
     st.plotly_chart(fig, use_container_width=True)
 
 
+# ===== AI 배우 비교/탐색 기능 =====
+
+DISCOVERY_GRADE_RANGES = {
+    "전체": GRADE_ORDER,
+    "S": ["S"],
+    "A급 이상": ["S", "A++", "A+", "A"],
+    "B++ 이상": ["S", "A++", "A+", "A", "B++"],
+    "B+ 이상": ["S", "A++", "A+", "A", "B++", "B+"],
+    "B 이상": ["S", "A++", "A+", "A", "B++", "B+", "B"],
+}
+
+DISCOVERY_FOCUS_SORT = {
+    "균형형": ["합산점수", "배우화제성"],
+    "폭발력": ["폭발백분율", "합산점수"],
+    "안정성": ["안정백분율", "합산점수"],
+    "기여도": ["기여백분율", "합산점수"],
+}
+
+DISCOVERY_FOCUS_GUIDE = {
+    "균형형": "사용자는 이번 탐색에서 세 축의 균형과 종합 체급을 함께 중요하게 본다. 특정 한 축만 과대해석하지 말고 합산등급, 축별 등급, 출연작품수를 함께 해석한다.",
+    "폭발력": "사용자는 이번 탐색에서 폭발력을 특히 중요하게 본다. 초반 화제성 점화, 대표 퍼포먼스의 고점, 런칭 임팩트 관점의 해석을 우선하되 안정성·기여도 약점도 함께 짚는다.",
+    "안정성": "사용자는 이번 탐색에서 안정성을 특히 중요하게 본다. 반복 성과, 성과 하한 방어, 특정 작품 편중 여부 관점의 해석을 우선하되 폭발력 한계도 함께 짚는다.",
+    "기여도": "사용자는 이번 탐색에서 기여도를 특히 중요하게 본다. 작품 안에서의 중심성, 존재감, 화제성 점유 역할 관점의 해석을 우선하되 외연 확장력과 반복성도 함께 본다.",
+}
+
+DISCOVERY_DISPLAY_COLUMNS = [
+    "배우", "성별", "연령대", "합산등급", "폭발력등급", "안정성등급", "기여도등급",
+    "합산점수", "폭발백분율", "안정백분율", "기여백분율", "배우화제성", "출연작품수", "출연작"
+]
+
+
+def get_grade_range_options(label: str) -> List[str]:
+    return DISCOVERY_GRADE_RANGES.get(str(label), GRADE_ORDER)
+
+
+def sort_candidates_by_focus(df: pd.DataFrame, focus_metric: str) -> pd.DataFrame:
+    sort_cols = DISCOVERY_FOCUS_SORT.get(str(focus_metric), DISCOVERY_FOCUS_SORT["균형형"])
+    use_cols = [c for c in sort_cols if c in df.columns]
+    if "배우화제성" in df.columns and "배우화제성" not in use_cols:
+        use_cols.append("배우화제성")
+    return df.sort_values(use_cols, ascending=[False] * len(use_cols)).reset_index(drop=True)
+
+
+def build_actor_ai_record(row: pd.Series, raw_df: pd.DataFrame = None, include_work_summary: bool = True) -> Dict:
+    record = {
+        "배우": str(row.get("배우", "")),
+        "성별": str(row.get("성별", "미상")),
+        "연령대": str(row.get("연령대", "미상")),
+        "합산등급": str(row.get("합산등급", "")),
+        "합산점수": None if pd.isna(row.get("합산점수", np.nan)) else round(float(row.get("합산점수", 0)), 2),
+        "폭발력등급": str(row.get("폭발력등급", "")),
+        "안정성등급": str(row.get("안정성등급", "")),
+        "기여도등급": str(row.get("기여도등급", "")),
+        "폭발백분율": None if pd.isna(row.get("폭발백분율", np.nan)) else round(float(row.get("폭발백분율", 0)) * 100, 1),
+        "안정백분율": None if pd.isna(row.get("안정백분율", np.nan)) else round(float(row.get("안정백분율", 0)) * 100, 1),
+        "기여백분율": None if pd.isna(row.get("기여백분율", np.nan)) else round(float(row.get("기여백분율", 0)) * 100, 1),
+        "배우화제성": None if pd.isna(row.get("배우화제성", np.nan)) else int(round(float(row.get("배우화제성", 0)))),
+        "출연작품수": None if pd.isna(row.get("출연작품수", np.nan)) else int(round(float(row.get("출연작품수", 0)))),
+        "출연작": str(row.get("출연작", "")),
+    }
+    if include_work_summary and raw_df is not None:
+        record["전작요약"] = build_actor_work_summary(raw_df, record["배우"], top_n=3)
+    return record
+
+
+def build_discovery_compare_payload(raw_df: pd.DataFrame, result_df: pd.DataFrame, actor_names: List[str], focus_metric: str) -> Tuple[str, pd.DataFrame]:
+    actor_names = [name for name in actor_names if name]
+    selected_df = result_df[result_df["배우"].isin(actor_names)].copy()
+    if selected_df.empty:
+        return "", selected_df
+
+    selected_df["선택순서"] = selected_df["배우"].apply(lambda x: actor_names.index(x) if x in actor_names else 999)
+    selected_df = selected_df.sort_values("선택순서").reset_index(drop=True)
+    records = [build_actor_ai_record(row, raw_df, include_work_summary=True) for _, row in selected_df.iterrows()]
+
+    payload = {
+        "mode": "compare",
+        "analysis_goal": "선택 배우들의 캐스팅/마케팅 관점 비교",
+        "focus_metric": focus_metric,
+        "focus_guidance": DISCOVERY_FOCUS_GUIDE.get(focus_metric, DISCOVERY_FOCUS_GUIDE["균형형"]),
+        "selected_count": len(records),
+        "actors": records,
+        "notes": [
+            "비교는 입력된 배우 데이터 안에서만 수행한다.",
+            "같은 등급 내 1~2점 차이는 역할 구분의 주된 근거로 사용하지 않는다.",
+            "선택된 핵심지표는 필터링 조건이 아니라 해석 관점이다.",
+        ],
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2), selected_df
+
+
+def build_discovery_explore_payload(
+    raw_df: pd.DataFrame,
+    filtered_df: pd.DataFrame,
+    conditions: Dict,
+    focus_metric: str,
+    analysis_limit: int,
+) -> Tuple[str, pd.DataFrame]:
+    ordered = sort_candidates_by_focus(filtered_df.copy(), focus_metric)
+    analysis_df = ordered.head(int(analysis_limit)).copy()
+    records = [build_actor_ai_record(row, raw_df, include_work_summary=True) for _, row in analysis_df.iterrows()]
+
+    payload = {
+        "mode": "explore",
+        "analysis_goal": "조건에 맞는 배우 후보 추천과 활용 방향 도출",
+        "user_conditions": conditions,
+        "focus_metric": focus_metric,
+        "focus_guidance": DISCOVERY_FOCUS_GUIDE.get(focus_metric, DISCOVERY_FOCUS_GUIDE["균형형"]),
+        "matched_count": int(len(filtered_df)),
+        "analysis_limit": int(analysis_limit),
+        "analysis_candidates": records,
+        "notes": [
+            "조건 필터링은 코드에서 이미 수행되었다.",
+            "후보 추천은 제공된 analysis_candidates 안에서만 수행한다.",
+            "핵심지표는 후보 제외 조건이 아니라 추천 사유를 해석할 때 우선 참고하는 관점이다.",
+            "동일 등급 내 미세 점수차만으로 배우를 서열화하지 않는다.",
+        ],
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2), analysis_df
+
+
+@lru_cache(maxsize=1)
+def load_actor_discovery_prompt() -> str:
+    candidates = [
+        Path(__file__).resolve().parent / ACTOR_DISCOVERY_PROMPT_FILE,
+        Path.cwd() / ACTOR_DISCOVERY_PROMPT_FILE,
+    ]
+    for prompt_path in candidates:
+        if prompt_path.is_file():
+            try:
+                txt = prompt_path.read_text(encoding="utf-8").strip()
+                if txt:
+                    return txt
+            except Exception:
+                pass
+    return """
+역할: 너는 드라마 캐스팅과 디지털 화제성 데이터를 함께 해석하는 배우 후보 추천/비교 분석가다.
+
+출력 형식: 반드시 HTML만 출력한다. Markdown, 코드블록, 일반 설명은 금지한다.
+
+분석 원칙:
+1. 제공된 후보 데이터 안에서만 판단한다.
+2. 등급명만 반복하지 말고, 캐스팅/마케팅 관점의 역할로 번역한다.
+3. 핵심지표는 필터링 조건이 아니라 사용자가 중요하게 보는 해석 관점이다.
+4. 같은 등급 내 1~2점 차이만으로 주도축/보완축을 단정하지 않는다.
+5. 강점, 한계, 활용 방향을 함께 제시한다.
+6. 입력에 없는 작품 평판이나 흥행 결과를 지어내지 않는다.
+
+출력 구조:
+<div class="actor-discovery-report">
+<div class="discovery-section">
+<h3>[추천/비교 요약]</h3>
+<ul><li>핵심 판단</li></ul>
+</div>
+<div class="discovery-section">
+<h3>[후보별 해석]</h3>
+<ul><li><strong>배우명</strong>: 해석</li></ul>
+</div>
+<div class="discovery-section total">
+<h3>[활용 방향]</h3>
+<ul><li>강점</li><li>한계</li><li>추천 활용</li></ul>
+</div>
+</div>
+""".strip()
+
+
+def call_actor_discovery_ai(system_instruction: str, user_payload: str) -> str:
+    keys = get_gemini_keys()
+    if not keys:
+        return "<div class='actor-discovery-box'>Gemini API Key가 설정되지 않았습니다.</div>"
+
+    from google.generativeai.types import HarmBlockThreshold, HarmCategory
+    safety_settings = {
+        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+    }
+
+    model_name = "gemini-3-flash-preview"
+    try:
+        chatbot_cfg = dict(st.secrets.get("chatbot", {})) if "chatbot" in st.secrets else {}
+        model_name = str(chatbot_cfg.get("gemini_model") or model_name)
+    except Exception:
+        pass
+
+    last_error = None
+    for key in keys:
+        try:
+            genai.configure(api_key=key)
+            model = genai.GenerativeModel(
+                model_name,
+                generation_config={"temperature": 0.2, "max_output_tokens": 4096},
+                system_instruction=system_instruction,
+            )
+            resp = model.generate_content(
+                user_payload,
+                request_options={"timeout": 180},
+                safety_settings=safety_settings,
+            )
+            if getattr(resp, "text", None):
+                return resp.text
+            if c0 := (getattr(resp, "candidates", None) or [None])[0]:
+                if p0 := (getattr(c0, "content", None) and getattr(c0.content, "parts", None) or [None])[0]:
+                    if hasattr(p0, "text"):
+                        return p0.text
+            return "<div class='actor-discovery-box'>AI 응답이 비어 있습니다.</div>"
+        except Exception as e:
+            last_error = e
+            if "429" in str(e) or "quota" in str(e).lower():
+                continue
+    msg = str(last_error) if last_error else "알 수 없는 오류"
+    return f"<div class='actor-discovery-box'>AI 분석 중 오류가 발생했습니다.<br>{msg}</div>"
+
+
+def render_actor_ai_compare_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
+    st.markdown("<div class='overview-section-title'>AI 비교</div>", unsafe_allow_html=True)
+    st.caption("배우를 직접 선택하면, 선택 배우의 요약 지표와 전작 요약만 LLM에 전달해 비교합니다.")
+
+    actor_options = result_df.sort_values(["합산점수", "배우화제성"], ascending=[False, False])["배우"].tolist()
+    c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.2, 1.0])
+    with c1:
+        actor1 = st.selectbox("배우 1", actor_options, index=0, key="ai_compare_actor_1")
+    with c2:
+        actor2 = st.selectbox("배우 2", actor_options, index=1 if len(actor_options) > 1 else 0, key="ai_compare_actor_2")
+    with c3:
+        actor3_options = ["선택 안 함"] + actor_options
+        actor3 = st.selectbox("배우 3", actor3_options, index=0, key="ai_compare_actor_3")
+    with c4:
+        focus_metric = st.selectbox("비교 관점", ["균형형", "폭발력", "안정성", "기여도"], index=0, key="ai_compare_focus")
+
+    selected_names = [actor1, actor2]
+    if actor3 != "선택 안 함":
+        selected_names.append(actor3)
+    selected_names = list(dict.fromkeys([n for n in selected_names if n]))
+
+    comp_df = compare_table_rows(result_df, selected_names)
+    if not comp_df.empty:
+        st.dataframe(
+            comp_df.style.format({"합산점수": "{:.2f}", "배우화제성": "{:,.0f}", "출연작품수": "{:,.0f}"}),
+            use_container_width=True,
+            hide_index=True,
+        )
+        render_actor_radar(result_df, comp_df["배우"].tolist(), "AI 비교 대상 · 항목별 점수", dynamic_range=True)
+
+    if len(selected_names) < 2:
+        st.info("비교할 배우를 2명 이상 선택해주세요.")
+        return
+
+    with st.expander("LLM 전달 정보 미리보기", expanded=False):
+        payload, _ = build_discovery_compare_payload(raw_df, result_df, selected_names, focus_metric)
+        st.code(payload, language="json")
+
+    if st.button("AI 비교 분석 시작", type="primary", use_container_width=True, key="ai_compare_button"):
+        prompt = load_actor_discovery_prompt()
+        payload, payload_df = build_discovery_compare_payload(raw_df, result_df, selected_names, focus_metric)
+        if payload_df.empty:
+            st.warning("선택 배우 데이터를 찾지 못했습니다.")
+            return
+        with st.spinner("선택 배우를 비교 분석하는 중입니다..."):
+            html = call_actor_discovery_ai(prompt, payload)
+        st.markdown(html, unsafe_allow_html=True)
+
+
+def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
+    st.markdown("<div class='overview-section-title'>AI 탐색</div>", unsafe_allow_html=True)
+    st.caption("조건은 코드가 먼저 필터링하고, 핵심지표는 LLM이 추천 사유를 해석할 때 참고하는 관점으로만 사용합니다.")
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        gender = st.selectbox("성별", ["전체", "남", "여"], index=0, key="ai_explore_gender")
+    with c2:
+        age_options = ["전체"] + sort_age_groups(result_df["연령대"].dropna().astype(str).unique().tolist())
+        age_group = st.selectbox("연령대", age_options, index=0, key="ai_explore_age")
+    with c3:
+        grade_range = st.selectbox("등급 범위", list(DISCOVERY_GRADE_RANGES.keys()), index=2, key="ai_explore_grade_range")
+
+    c4, c5, c6 = st.columns(3)
+    with c4:
+        focus_metric = st.selectbox("핵심지표", ["균형형", "폭발력", "안정성", "기여도"], index=0, key="ai_explore_focus")
+    with c5:
+        min_works_label = st.selectbox("최소 출연작품수", ["전체", "2작품 이상", "3작품 이상", "5작품 이상"], index=0, key="ai_explore_min_works")
+    with c6:
+        analysis_limit = st.selectbox("AI 분석 후보 수", [5, 10, 20], index=1, key="ai_explore_limit")
+
+    filtered = result_df.copy()
+    conditions = {
+        "성별": gender,
+        "연령대": age_group,
+        "등급범위": grade_range,
+        "핵심지표": focus_metric,
+        "최소출연작품수": min_works_label,
+        "AI분석후보수": int(analysis_limit),
+    }
+
+    if gender != "전체":
+        filtered = filtered[filtered["성별"] == gender].copy()
+    if age_group != "전체":
+        filtered = filtered[filtered["연령대"] == age_group].copy()
+    if grade_range != "전체":
+        filtered = filtered[filtered["합산등급"].isin(get_grade_range_options(grade_range))].copy()
+    min_works = {"전체": 0, "2작품 이상": 2, "3작품 이상": 3, "5작품 이상": 5}.get(min_works_label, 0)
+    if min_works > 0:
+        filtered = filtered[pd.to_numeric(filtered["출연작품수"], errors="coerce").fillna(0) >= min_works].copy()
+
+    filtered = sort_candidates_by_focus(filtered, focus_metric)
+    st.caption(f"조건 일치 배우 {len(filtered):,}명 · AI 분석 대상 상위 {min(int(analysis_limit), len(filtered)):,}명")
+
+    if filtered.empty:
+        st.info("조건에 맞는 배우가 없습니다.")
+        return
+
+    display_cols = [c for c in DISCOVERY_DISPLAY_COLUMNS if c in filtered.columns]
+    st.dataframe(
+        filtered[display_cols]
+        .style.format({
+            "합산점수": "{:.2f}",
+            "폭발백분율": "{:.1%}",
+            "안정백분율": "{:.1%}",
+            "기여백분율": "{:.1%}",
+            "배우화제성": "{:,.0f}",
+            "출연작품수": "{:,.0f}",
+        }),
+        use_container_width=True,
+        hide_index=True,
+        height=420,
+    )
+    render_actor_radar(filtered, filtered["배우"].head(min(8, len(filtered))).tolist(), "AI 탐색 후보 · 상대 위치 기준", dynamic_range=True, relative_mode=True)
+
+    with st.expander("LLM 전달 정보 미리보기", expanded=False):
+        payload, _ = build_discovery_explore_payload(raw_df, filtered, conditions, focus_metric, int(analysis_limit))
+        st.code(payload, language="json")
+
+    if st.button("AI 후보 분석 시작", type="primary", use_container_width=True, key="ai_explore_button"):
+        prompt = load_actor_discovery_prompt()
+        payload, payload_df = build_discovery_explore_payload(raw_df, filtered, conditions, focus_metric, int(analysis_limit))
+        if payload_df.empty:
+            st.warning("AI에 전달할 후보 데이터가 없습니다.")
+            return
+        with st.spinner("조건 후보를 분석하는 중입니다..."):
+            html = call_actor_discovery_ai(prompt, payload)
+        st.markdown(html, unsafe_allow_html=True)
+
+
 def render_compare(raw_df: pd.DataFrame, result_df: pd.DataFrame):
     st.markdown("<div class='section-title'>배우 모아보기</div>", unsafe_allow_html=True)
-    tab_group, tab_pair = st.tabs(["그룹 모아보기", "배우 직접 선택 1:1 비교"])
+    tab_ai_compare, tab_ai_explore, tab_group, tab_pair = st.tabs(["AI 비교", "AI 탐색", "그룹 모아보기", "배우 직접 선택 1:1 비교"])
+
+    with tab_ai_compare:
+        render_actor_ai_compare_tab(raw_df, result_df)
+
+    with tab_ai_explore:
+        render_actor_ai_explore_tab(raw_df, result_df)
 
     with tab_group:
         c1, c2, c3, c4 = st.columns(4)
