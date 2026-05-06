@@ -1614,46 +1614,46 @@ def render_reference():
 <div style='background:#f8fafc; border:1px solid #e5e7eb; border-radius:18px; padding:18px 18px 16px 18px;'>
 
 <div style='display:flex; width:100%; height:28px; border-radius:999px; overflow:hidden; box-shadow: inset 0 0 0 1px rgba(15,23,42,0.06);'>
-<div style='width:5%; background:linear-gradient(90deg, #ffe6e1 0%, #ffd0ca 100%);'></div>
-<div style='width:10%; background:linear-gradient(90deg, #ff9d93 0%, #f45b49 100%);'></div>
-<div style='width:15%; background:linear-gradient(90deg, #ffb15b 0%, #ef7d1a 100%);'></div>
-<div style='width:20%; background:linear-gradient(90deg, #dff7f1 0%, #b7efe3 100%);'></div>
-<div style='width:20%; background:linear-gradient(90deg, #57d7c0 0%, #24baa1 100%);'></div>
-<div style='width:15%; background:linear-gradient(90deg, #18b69d 0%, #0b8f7c 100%);'></div>
-<div style='width:5%; background:linear-gradient(90deg, #c8d7ff 0%, #9ab7ff 100%);'></div>
-<div style='width:6%; background:linear-gradient(90deg, #7096ff 0%, #3f74ff 100%);'></div>
-<div style='width:2%; background:linear-gradient(90deg, #426cff 0%, #1747d1 100%);'></div>
-<div style='width:2%; background:linear-gradient(90deg, #9a66ff 0%, #7a3cff 100%);'></div>
+<div style='width:2%; background:linear-gradient(90deg, #7a3cff 0%, #9a66ff 100%);'></div>
+<div style='width:2%; background:linear-gradient(90deg, #1747d1 0%, #426cff 100%);'></div>
+<div style='width:6%; background:linear-gradient(90deg, #3f74ff 0%, #7096ff 100%);'></div>
+<div style='width:5%; background:linear-gradient(90deg, #9ab7ff 0%, #c8d7ff 100%);'></div>
+<div style='width:15%; background:linear-gradient(90deg, #0b8f7c 0%, #18b69d 100%);'></div>
+<div style='width:20%; background:linear-gradient(90deg, #24baa1 0%, #57d7c0 100%);'></div>
+<div style='width:20%; background:linear-gradient(90deg, #b7efe3 0%, #dff7f1 100%);'></div>
+<div style='width:15%; background:linear-gradient(90deg, #ef7d1a 0%, #ffb15b 100%);'></div>
+<div style='width:10%; background:linear-gradient(90deg, #f45b49 0%, #ff9d93 100%);'></div>
+<div style='width:5%; background:linear-gradient(90deg, #ffd0ca 0%, #ffe6e1 100%);'></div>
 </div>
 
 <div style='display:flex; width:100%; margin-top:10px; font-size:0.78rem; font-weight:800; color:#334155;'>
-<div style='width:5%; text-align:left;'>C</div>
-<div style='width:10%; text-align:center;'>C+</div>
-<div style='width:15%; text-align:center;'>C++</div>
-<div style='width:20%; text-align:center;'>B</div>
-<div style='width:20%; text-align:center;'>B+</div>
-<div style='width:15%; text-align:center;'>B++</div>
-<div style='width:5%; text-align:center;'>A</div>
-<div style='width:6%; text-align:center;'>A+</div>
+<div style='width:2%; text-align:left;'>S</div>
 <div style='width:2%; text-align:center;'>A++</div>
-<div style='width:2%; text-align:right;'>S</div>
+<div style='width:6%; text-align:center;'>A+</div>
+<div style='width:5%; text-align:center;'>A</div>
+<div style='width:15%; text-align:center;'>B++</div>
+<div style='width:20%; text-align:center;'>B+</div>
+<div style='width:20%; text-align:center;'>B</div>
+<div style='width:15%; text-align:center;'>C++</div>
+<div style='width:10%; text-align:center;'>C+</div>
+<div style='width:5%; text-align:right;'>C</div>
 </div>
 
 <div style='display:flex; width:100%; margin-top:8px; font-size:0.74rem; color:#64748b;'>
-<div style='width:5%; text-align:left;'>0</div>
-<div style='width:10%; text-align:center;'>5</div>
-<div style='width:15%; text-align:center;'>15</div>
-<div style='width:20%; text-align:center;'>30</div>
-<div style='width:20%; text-align:center;'>50</div>
-<div style='width:15%; text-align:center;'>70</div>
-<div style='width:5%; text-align:center;'>85</div>
-<div style='width:6%; text-align:center;'>90</div>
+<div style='width:2%; text-align:left;'>98↑</div>
 <div style='width:2%; text-align:center;'>96</div>
-<div style='width:2%; text-align:right;'>98↑</div>
+<div style='width:6%; text-align:center;'>90</div>
+<div style='width:5%; text-align:center;'>85</div>
+<div style='width:15%; text-align:center;'>70</div>
+<div style='width:20%; text-align:center;'>50</div>
+<div style='width:20%; text-align:center;'>30</div>
+<div style='width:15%; text-align:center;'>15</div>
+<div style='width:10%; text-align:center;'>5</div>
+<div style='width:5%; text-align:right;'>0</div>
 </div>
 
 <div style='margin-top:14px; font-size:0.84rem; color:#64748b; line-height:1.65;'>
-예: <b>A+</b>는 <b>상위 90% 이상</b>, <b>S</b>는 <b>상위 98% 이상</b>을 의미합니다.
+왼쪽으로 갈수록 상위 백분위입니다. 예: <b>A+</b>는 <b>상위 90% 이상</b>, <b>S</b>는 <b>상위 98% 이상</b>을 의미합니다.
 </div>
 </div>
 </div>
