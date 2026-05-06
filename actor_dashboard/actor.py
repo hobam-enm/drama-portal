@@ -102,6 +102,7 @@ CURRENT_YEAR = 2026
 
 ACTOR_COMBO_PROMPT_FILE = "actor_combo_prompt_updated.md"
 ACTOR_DISCOVERY_PROMPT_FILE = "actor_discovery_prompt.md"
+ACTOR_PARTNER_PROMPT_FILE = "actor_partner_prompt.md"
 DEFAULT_ACTOR_COMBO_PROMPT = r"""역할: 너는 드라마 캐스팅 전략과 마케팅 구조를 함께 해석하는 콘텐츠/편성 전략 분석가다.
 
 목표: 입력된 배우들의 다차원 화제성 등급 정보를 바탕으로, 개별 배우의 단순 나열이 아니라 "배우 조합 구조"를 분석해 캐스팅 관점에서의 강점, 보완점, 시너지 구조를 실무형 코멘트로 정리한다.
@@ -2074,6 +2075,93 @@ def build_discovery_explore_payload(
     return json.dumps(payload, ensure_ascii=False, indent=2), analysis_df
 
 
+def build_partner_payload(
+    raw_df: pd.DataFrame,
+    result_df: pd.DataFrame,
+    fixed_actor_names: List[str],
+    candidate_df: pd.DataFrame,
+    conditions: Dict,
+    focus_metric: str,
+    project_summary: str = "",
+) -> Tuple[str, pd.DataFrame, pd.DataFrame]:
+    fixed_actor_names = [name for name in fixed_actor_names if name]
+    fixed_df = result_df[result_df["배우"].isin(fixed_actor_names)].copy()
+    if not fixed_df.empty:
+        fixed_df["선택순서"] = fixed_df["배우"].apply(lambda x: fixed_actor_names.index(x) if x in fixed_actor_names else 999)
+        fixed_df = fixed_df.sort_values("선택순서").reset_index(drop=True)
+
+    analysis_df = sort_candidates_by_focus(candidate_df.copy(), focus_metric).copy()
+    fixed_records = [build_actor_ai_record(row, raw_df, include_work_summary=True) for _, row in fixed_df.iterrows()]
+    candidate_records = [build_actor_ai_record(row, raw_df, include_work_summary=True) for _, row in analysis_df.iterrows()]
+
+    payload = {
+        "mode": "partner_search",
+        "analysis_goal": "이미 확정된 배우와의 조합 적합성을 기준으로 상대 배우 후보 추천",
+        "fixed_actor_count": int(len(fixed_records)),
+        "fixed_actors": fixed_records,
+        "user_conditions": conditions,
+        "focus_metric": focus_metric,
+        "focus_guidance": DISCOVERY_FOCUS_GUIDE.get(focus_metric, DISCOVERY_FOCUS_GUIDE["균형형"]),
+        "project_summary": str(project_summary or "").strip(),
+        "project_summary_guidance": "사용자가 입력한 작품 한줄요약이 있으면, 해당 장르/톤/기획 방향과 확정 배우·후보 배우의 조합 적합성을 함께 고려한다. 단, 입력된 문구를 작품 성패나 실제 편성 정보처럼 단정하지 않는다.",
+        "matched_count": int(len(candidate_df)),
+        "partner_candidates": candidate_records,
+        "notes": [
+            "확정 배우는 추천 대상이 아니라 조합 기준점이다.",
+            "후보 추천은 제공된 partner_candidates 안에서만 수행한다.",
+            "핵심지표는 후보 제외 조건이 아니라 조합 적합성을 해석할 때 우선 참고하는 관점이다.",
+            "확정 배우와 후보 배우의 강점 중복, 보완 가능성, 체급 균형, 장르/톤 적합성을 함께 본다.",
+            "동일 등급 내 미세 점수차만으로 배우를 서열화하지 않는다.",
+        ],
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2), fixed_df, analysis_df
+
+
+@lru_cache(maxsize=1)
+def load_actor_partner_prompt() -> str:
+    candidates = [
+        Path(__file__).resolve().parent / ACTOR_PARTNER_PROMPT_FILE,
+        Path.cwd() / ACTOR_PARTNER_PROMPT_FILE,
+    ]
+    for prompt_path in candidates:
+        if prompt_path.is_file():
+            try:
+                txt = prompt_path.read_text(encoding="utf-8").strip()
+                if txt:
+                    return txt
+            except Exception:
+                pass
+    return """
+역할: 너는 드라마 캐스팅과 디지털 화제성 데이터를 함께 해석하는 상대 배우 추천 분석가다.
+
+출력 형식: 반드시 HTML만 출력한다. Markdown, 코드블록, 일반 설명은 금지한다.
+
+분석 원칙:
+1. 확정 배우는 추천 대상이 아니라 조합 기준점으로 본다.
+2. 후보 추천은 제공된 partner_candidates 안에서만 수행한다.
+3. 확정 배우와 후보 배우의 강점 중복, 보완 가능성, 체급 균형, 작품 톤 적합성을 함께 해석한다.
+4. 핵심지표는 필터링 조건이 아니라 사용자가 중요하게 보는 해석 관점이다.
+5. 같은 등급 내 1~2점 차이만으로 주도축/보완축을 단정하지 않는다.
+6. 강점, 한계, 활용 방향을 함께 제시한다.
+
+출력 구조:
+<div class="actor-discovery-report">
+<div class="discovery-section">
+<h3>[조합 기준 요약]</h3>
+<ul><li>확정 배우 기준에서 필요한 상대 배우 방향</li></ul>
+</div>
+<div class="discovery-section">
+<h3>[추천 후보]</h3>
+<ul><li><strong>배우명</strong>: 추천 이유와 주의점</li></ul>
+</div>
+<div class="discovery-section total">
+<h3>[활용 방향]</h3>
+<ul><li>우선 검토 후보</li><li>보완 포인트</li><li>마케팅/캐스팅 활용 방향</li></ul>
+</div>
+</div>
+""".strip()
+
+
 @lru_cache(maxsize=1)
 def load_actor_discovery_prompt() -> str:
     candidates = [
@@ -2319,15 +2407,157 @@ def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
         st.markdown(html, unsafe_allow_html=True)
 
 
+def render_actor_partner_search_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
+    st.markdown("<div class='detail-section-title'>상대배우 찾기</div>", unsafe_allow_html=True)
+    st.caption("이미 확정된 배우를 기준점으로 두고, 조건에 맞는 상대 배우 후보를 LLM이 조합 관점에서 추천합니다.")
+
+    actor_options = result_df.sort_values(["합산점수", "배우화제성"], ascending=[False, False])["배우"].tolist()
+    default_fixed = actor_options[:1]
+    fixed_names = st.multiselect(
+        "확정 배우 선택",
+        options=actor_options,
+        default=default_fixed,
+        placeholder="이미 캐스팅이 확정되었거나 기준으로 삼을 배우를 선택하세요",
+        key="ai_partner_fixed_actors",
+    )
+
+    fixed_df = result_df[result_df["배우"].isin(fixed_names)].copy()
+    if not fixed_df.empty:
+        fixed_df["선택순서"] = fixed_df["배우"].apply(lambda x: fixed_names.index(x) if x in fixed_names else 999)
+        fixed_df = fixed_df.sort_values("선택순서").reset_index(drop=True)
+        st.dataframe(
+            fixed_df[[c for c in DISCOVERY_DISPLAY_COLUMNS if c in fixed_df.columns]]
+            .style.format({
+                "합산점수": "{:.2f}",
+                "폭발백분율": "{:.1%}",
+                "안정백분율": "{:.1%}",
+                "기여백분율": "{:.1%}",
+                "배우화제성": "{:,.0f}",
+                "출연작품수": "{:,.0f}",
+            }),
+            use_container_width=True,
+            hide_index=True,
+            height=160,
+        )
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        gender = st.selectbox("상대 배우 성별", ["전체", "남", "여"], index=0, key="ai_partner_gender")
+    with c2:
+        age_options = ["전체"] + sort_age_groups(result_df["연령대"].dropna().astype(str).unique().tolist())
+        age_group = st.selectbox("상대 배우 연령대", age_options, index=0, key="ai_partner_age")
+    with c3:
+        grade_bounds = st.select_slider(
+            "상대 배우 합산등급 범위",
+            options=GRADE_ORDER,
+            value=("S", "A"),
+            key="ai_partner_grade_bounds",
+        )
+        upper_grade, lower_grade = grade_bounds
+        grade_range_label = format_grade_range_label(upper_grade, lower_grade)
+
+    c4, c5 = st.columns(2)
+    with c4:
+        focus_metric = st.selectbox("핵심지표", ["균형형", "폭발력", "안정성", "기여도"], index=0, key="ai_partner_focus")
+    with c5:
+        min_works_label = st.selectbox("상대 배우 최소 출연작품수", ["전체", "2작품 이상", "3작품 이상", "5작품 이상"], index=0, key="ai_partner_min_works")
+
+    project_summary = st.text_area(
+        "작품 한줄요약",
+        value="",
+        placeholder="예: 30대 여성 타깃의 현실 공감형 로맨스 드라마",
+        height=72,
+        key="ai_partner_project_summary",
+        help="확정 배우와 상대 후보의 장르·톤·기획 방향 적합성을 함께 보도록 LLM에 전달합니다.",
+    )
+
+    if not fixed_names:
+        st.info("확정 배우를 최소 1명 이상 선택해주세요.")
+        return
+
+    filtered = result_df[~result_df["배우"].isin(fixed_names)].copy()
+    conditions = {
+        "확정배우": fixed_names,
+        "상대배우성별": gender,
+        "상대배우연령대": age_group,
+        "상대배우합산등급범위": grade_range_label,
+        "핵심지표": focus_metric,
+        "상대배우최소출연작품수": min_works_label,
+        "작품한줄요약": str(project_summary or "").strip(),
+    }
+
+    if gender != "전체":
+        filtered = filtered[filtered["성별"] == gender].copy()
+    if age_group != "전체":
+        filtered = filtered[filtered["연령대"] == age_group].copy()
+    allowed_grades = get_grade_range_by_bounds(upper_grade, lower_grade)
+    filtered = filtered[filtered["합산등급"].isin(allowed_grades)].copy()
+    min_works = {"전체": 0, "2작품 이상": 2, "3작품 이상": 3, "5작품 이상": 5}.get(min_works_label, 0)
+    if min_works > 0:
+        filtered = filtered[pd.to_numeric(filtered["출연작품수"], errors="coerce").fillna(0) >= min_works].copy()
+
+    filtered = sort_candidates_by_focus(filtered, focus_metric)
+    st.caption(f"조건 일치 상대 후보 {len(filtered):,}명")
+
+    if filtered.empty:
+        st.info("조건에 맞는 상대 배우 후보가 없습니다.")
+        return
+
+    too_many_candidates = len(filtered) > 50
+    if too_many_candidates:
+        st.warning("후보가 50명 이하가 되도록 필터를 조정해주세요.")
+
+    display_cols = [c for c in DISCOVERY_DISPLAY_COLUMNS if c in filtered.columns]
+    st.dataframe(
+        filtered[display_cols]
+        .style.format({
+            "합산점수": "{:.2f}",
+            "폭발백분율": "{:.1%}",
+            "안정백분율": "{:.1%}",
+            "기여백분율": "{:.1%}",
+            "배우화제성": "{:,.0f}",
+            "출연작품수": "{:,.0f}",
+        }),
+        use_container_width=True,
+        hide_index=True,
+        height=420,
+    )
+
+    if too_many_candidates:
+        st.button("AI 상대배우 추천 시작", type="primary", use_container_width=True, key="ai_partner_button_disabled", disabled=True)
+        return
+
+    if st.button("AI 상대배우 추천 시작", type="primary", use_container_width=True, key="ai_partner_button"):
+        prompt = load_actor_partner_prompt()
+        payload, payload_fixed_df, payload_candidate_df = build_partner_payload(
+            raw_df, result_df, fixed_names, filtered, conditions, focus_metric, project_summary
+        )
+        if payload_fixed_df.empty:
+            st.warning("확정 배우 데이터를 찾지 못했습니다.")
+            return
+        if payload_candidate_df.empty:
+            st.warning("AI에 전달할 상대 후보 데이터가 없습니다.")
+            return
+        with st.spinner("확정 배우와의 조합을 기준으로 상대 후보를 분석하는 중입니다..."):
+            html = call_actor_discovery_ai(prompt, payload)
+        st.markdown(html, unsafe_allow_html=True)
+
+
 def render_compare(raw_df: pd.DataFrame, result_df: pd.DataFrame):
     st.markdown("<div class='section-title'>배우 비교/탐색하기(AI)</div>", unsafe_allow_html=True)
-    tab_ai_compare, tab_ai_explore = st.tabs(["비교하기", "탐색하기"])
+    tab_ai_compare, tab_ai_explore, tab_ai_partner, tab_ai_combo = st.tabs(["비교하기", "탐색하기", "상대배우 찾기", "조합분석"])
 
     with tab_ai_compare:
         render_actor_ai_compare_tab(raw_df, result_df)
 
     with tab_ai_explore:
         render_actor_ai_explore_tab(raw_df, result_df)
+
+    with tab_ai_partner:
+        render_actor_partner_search_tab(raw_df, result_df)
+
+    with tab_ai_combo:
+        render_actor_combo_ai(raw_df, result_df, embedded=True)
 
 
 @lru_cache(maxsize=1)
@@ -2576,8 +2806,11 @@ def call_actor_combo_ai(system_instruction: str, user_payload: str) -> str:
     return f"<div class='actor-combo-box'>AI 분석 중 오류가 발생했습니다.<br>{msg}</div>"
 
 
-def render_actor_combo_ai(raw_df: pd.DataFrame, result_df: pd.DataFrame):
-    st.markdown("<div class='section-title'>배우 조합 분석(AI)</div>", unsafe_allow_html=True)
+def render_actor_combo_ai(raw_df: pd.DataFrame, result_df: pd.DataFrame, embedded: bool = False):
+    if not embedded:
+        st.markdown("<div class='section-title'>배우 조합 분석(AI)</div>", unsafe_allow_html=True)
+    else:
+        st.markdown("<div class='detail-section-title'>조합분석</div>", unsafe_allow_html=True)
     st.markdown(
         "<div class='actor-combo-toolbar'><div class='hint'>메인 배우와 서브 배우를 나누어 선택하면, 절대 등급과 조합 내부 상대구조를 함께 반영해 AI가 조합을 해석합니다.</div></div>",
         unsafe_allow_html=True,
@@ -2653,9 +2886,9 @@ def main():
 
     with st.sidebar:
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
-        page_options = ["OVERVIEW", "배우 상세보기", "배우 비교/탐색하기(AI)", "배우 조합 분석(AI)", "참고사항"]
+        page_options = ["OVERVIEW", "배우 상세보기", "배우 비교/탐색하기(AI)", "참고사항"]
         query_page = str(st.query_params.get("page", "OVERVIEW"))
-        if query_page == "배우 모아보기":
+        if query_page in ["배우 모아보기", "배우 조합 분석(AI)"]:
             query_page = "배우 비교/탐색하기(AI)"
         initial_page = query_page if query_page in page_options else "OVERVIEW"
 
@@ -2681,8 +2914,6 @@ def main():
         render_detail(raw_df, result_df)
     elif page == "배우 비교/탐색하기(AI)":
         render_compare(raw_df, result_df)
-    elif page == "배우 조합 분석(AI)":
-        render_actor_combo_ai(raw_df, result_df)
     else:
         render_reference()
 
