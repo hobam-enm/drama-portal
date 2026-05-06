@@ -2049,11 +2049,9 @@ def build_discovery_explore_payload(
     filtered_df: pd.DataFrame,
     conditions: Dict,
     focus_metric: str,
-    analysis_limit: int,
     project_summary: str = "",
 ) -> Tuple[str, pd.DataFrame]:
-    ordered = sort_candidates_by_focus(filtered_df.copy(), focus_metric)
-    analysis_df = ordered.head(int(analysis_limit)).copy()
+    analysis_df = sort_candidates_by_focus(filtered_df.copy(), focus_metric).copy()
     records = [build_actor_ai_record(row, raw_df, include_work_summary=True) for _, row in analysis_df.iterrows()]
 
     payload = {
@@ -2065,7 +2063,6 @@ def build_discovery_explore_payload(
         "project_summary": str(project_summary or "").strip(),
         "project_summary_guidance": "사용자가 입력한 작품 한줄요약이 있으면, 해당 장르/톤/기획 방향과 배우 지표의 적합성을 함께 고려한다. 단, 입력된 문구를 작품 성패나 실제 편성 정보처럼 단정하지 않는다.",
         "matched_count": int(len(filtered_df)),
-        "analysis_limit": int(analysis_limit),
         "analysis_candidates": records,
         "notes": [
             "조건 필터링은 코드에서 이미 수행되었다.",
@@ -2245,13 +2242,11 @@ def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
         upper_grade, lower_grade = grade_bounds
         grade_range_label = format_grade_range_label(upper_grade, lower_grade)
 
-    c4, c5, c6 = st.columns(3)
+    c4, c5 = st.columns(2)
     with c4:
         focus_metric = st.selectbox("핵심지표", ["균형형", "폭발력", "안정성", "기여도"], index=0, key="ai_explore_focus")
     with c5:
         min_works_label = st.selectbox("최소 출연작품수", ["전체", "2작품 이상", "3작품 이상", "5작품 이상"], index=0, key="ai_explore_min_works")
-    with c6:
-        analysis_limit = st.selectbox("AI 분석 후보 수", [5, 10, 20], index=1, key="ai_explore_limit")
 
     project_summary = st.text_area(
         "작품 한줄요약",
@@ -2269,7 +2264,6 @@ def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
         "합산등급범위": grade_range_label,
         "핵심지표": focus_metric,
         "최소출연작품수": min_works_label,
-        "AI분석후보수": int(analysis_limit),
         "작품한줄요약": str(project_summary or "").strip(),
     }
 
@@ -2284,11 +2278,15 @@ def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
         filtered = filtered[pd.to_numeric(filtered["출연작품수"], errors="coerce").fillna(0) >= min_works].copy()
 
     filtered = sort_candidates_by_focus(filtered, focus_metric)
-    st.caption(f"조건 일치 배우 {len(filtered):,}명 · AI 분석 대상 상위 {min(int(analysis_limit), len(filtered)):,}명")
+    st.caption(f"조건 일치 배우 {len(filtered):,}명")
 
     if filtered.empty:
         st.info("조건에 맞는 배우가 없습니다.")
         return
+
+    too_many_candidates = len(filtered) > 50
+    if too_many_candidates:
+        st.warning("후보가 50명 이하가 되도록 필터를 조정해주세요.")
 
     display_cols = [c for c in DISCOVERY_DISPLAY_COLUMNS if c in filtered.columns]
     st.dataframe(
@@ -2306,9 +2304,13 @@ def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
         height=420,
     )
 
+    if too_many_candidates:
+        st.button("AI 후보 분석 시작", type="primary", use_container_width=True, key="ai_explore_button_disabled", disabled=True)
+        return
+
     if st.button("AI 후보 분석 시작", type="primary", use_container_width=True, key="ai_explore_button"):
         prompt = load_actor_discovery_prompt()
-        payload, payload_df = build_discovery_explore_payload(raw_df, filtered, conditions, focus_metric, int(analysis_limit), project_summary)
+        payload, payload_df = build_discovery_explore_payload(raw_df, filtered, conditions, focus_metric, project_summary)
         if payload_df.empty:
             st.warning("AI에 전달할 후보 데이터가 없습니다.")
             return
