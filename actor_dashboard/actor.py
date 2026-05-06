@@ -2544,7 +2544,7 @@ def render_actor_partner_search_tab(raw_df: pd.DataFrame, result_df: pd.DataFram
 
 
 def render_compare(raw_df: pd.DataFrame, result_df: pd.DataFrame):
-    st.markdown("<div class='section-title'>배우 비교/탐색하기(AI)</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-title'>(AI)배우 비교·탐색·찾기·조합</div>", unsafe_allow_html=True)
     tab_ai_compare, tab_ai_explore, tab_ai_partner, tab_ai_combo = st.tabs(["비교하기", "탐색하기", "상대배우 찾기", "조합분석"])
 
     with tab_ai_compare:
@@ -2886,10 +2886,10 @@ def main():
 
     with st.sidebar:
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
-        page_options = ["OVERVIEW", "배우 상세보기", "배우 비교/탐색하기(AI)", "참고사항"]
+        page_options = ["OVERVIEW", "배우 상세보기", "(AI)배우 비교·탐색·찾기·조합", "참고사항"]
         query_page = str(st.query_params.get("page", "OVERVIEW"))
         if query_page in ["배우 모아보기", "배우 조합 분석(AI)"]:
-            query_page = "배우 비교/탐색하기(AI)"
+            query_page = "(AI)배우 비교·탐색·찾기·조합"
         initial_page = query_page if query_page in page_options else "OVERVIEW"
 
         # URL page 파라미터와 사이드바 라디오 상태를 동기화합니다.
@@ -2912,7 +2912,7 @@ def main():
         render_overview(raw_df, result_df)
     elif page == "배우 상세보기":
         render_detail(raw_df, result_df)
-    elif page == "배우 비교/탐색하기(AI)":
+    elif page == "(AI)배우 비교·탐색·찾기·조합":
         render_compare(raw_df, result_df)
     else:
         render_reference()
