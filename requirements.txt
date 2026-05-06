@@ -12,6 +12,7 @@ google-auth-oauthlib
 google-auth-httplib2
 google-api-python-client
 google-generativeai
+google-genai
 
 streamlit-aggrid==0.3.4.post3
 extra-streamlit-components
