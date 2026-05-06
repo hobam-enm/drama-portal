@@ -5,7 +5,7 @@ import sys
 import os
 from functools import lru_cache
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from typing import Dict, List, Tuple
 
 import google.generativeai as genai
@@ -831,8 +831,54 @@ def metric_card(label: str, value: str, sub: str = ""):
     )
 
 
+def _current_query_params_dict() -> Dict[str, str]:
+    """현재 URL query params를 plain dict로 변환합니다.
+
+    actor 링크가 ?page=...&actor=...만 새로 만들면 frontgate handoff/auth 관련
+    파라미터가 사라질 수 있으므로, 기존 query params를 최대한 보존합니다.
+    """
+    params = {}
+    try:
+        for k, v in st.query_params.items():
+            if isinstance(v, list):
+                params[k] = str(v[-1]) if v else ""
+            else:
+                params[k] = str(v)
+    except Exception:
+        pass
+    return params
+
+
+def update_query_params_if_changed(**updates):
+    """값이 실제로 달라질 때만 query params를 갱신합니다.
+
+    Streamlit에서 렌더링 중 매번 st.query_params를 쓰면 불필요한 rerun이 발생해
+    selectbox가 한 번에 반영되지 않는 현상이 생길 수 있습니다.
+    """
+    try:
+        changed = False
+        for k, v in updates.items():
+            v = "" if v is None else str(v)
+            if str(st.query_params.get(k, "")) != v:
+                st.query_params[k] = v
+                changed = True
+        return changed
+    except Exception:
+        return False
+
+
+def build_query_href(**updates) -> str:
+    params = _current_query_params_dict()
+    for k, v in updates.items():
+        if v is None:
+            params.pop(k, None)
+        else:
+            params[k] = str(v)
+    return "?" + urlencode(params)
+
+
 def actor_detail_href(actor_name: str) -> str:
-    return f"?page={quote('배우 상세보기')}&actor={quote(str(actor_name))}"
+    return build_query_href(page="배우 상세보기", actor=str(actor_name))
 
 
 def actor_link_html(actor_name: str, font_size: str = None, extra_style: str = "") -> str:
@@ -1653,10 +1699,30 @@ def render_detail(raw_df: pd.DataFrame, result_df: pd.DataFrame):
     st.markdown("<div class='select-hint'>배우명을 검색해서 원하는 배우를 선택해 주세요.</div>", unsafe_allow_html=True)
     names = result_df["배우"].tolist()
     query_actor = str(st.query_params.get("actor", names[0])) if names else ""
-    default_index = names.index(query_actor) if query_actor in names else 0
-    selected_actor = st.selectbox("배우 선택", names, index=default_index, placeholder="배우명을 검색해 선택")
-    st.query_params["page"] = "배우 상세보기"
-    st.query_params["actor"] = selected_actor
+    initial_actor = query_actor if query_actor in names else (names[0] if names else "")
+
+    # URL로 들어온 actor와 selectbox 상태를 동기화합니다.
+    # 링크 클릭으로 actor가 바뀐 경우에는 session_state도 새 actor로 맞춰줍니다.
+    if (
+        "detail_selected_actor" not in st.session_state
+        or st.session_state.get("_detail_query_actor_synced") != initial_actor
+        or st.session_state.get("detail_selected_actor") not in names
+    ):
+        st.session_state["detail_selected_actor"] = initial_actor
+        st.session_state["_detail_query_actor_synced"] = initial_actor
+
+    default_index = names.index(st.session_state["detail_selected_actor"]) if st.session_state.get("detail_selected_actor") in names else 0
+    selected_actor = st.selectbox(
+        "배우 선택",
+        names,
+        index=default_index,
+        key="detail_selected_actor",
+        placeholder="배우명을 검색해 선택",
+    )
+
+    update_query_params_if_changed(page="배우 상세보기", actor=selected_actor)
+    st.session_state["_detail_query_actor_synced"] = selected_actor
+
     row = result_df[result_df["배우"] == selected_actor].iloc[0]
 
     actor_summary_card(row)
@@ -2173,9 +2239,23 @@ def main():
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
         page_options = ["OVERVIEW", "배우 상세보기", "배우 모아보기", "배우 조합 분석(AI)", "참고사항"]
         query_page = str(st.query_params.get("page", "OVERVIEW"))
-        default_page_index = page_options.index(query_page) if query_page in page_options else 0
-        page = st.radio("", page_options, index=default_page_index, label_visibility="collapsed")
-        st.query_params["page"] = page
+        initial_page = query_page if query_page in page_options else "OVERVIEW"
+
+        # URL page 파라미터와 사이드바 라디오 상태를 동기화합니다.
+        # 매 렌더마다 query_params를 강제로 쓰지 않아 불필요한 rerun을 줄입니다.
+        if (
+            "sidebar_page" not in st.session_state
+            or st.session_state.get("_sidebar_query_page_synced") != initial_page
+            or st.session_state.get("sidebar_page") not in page_options
+        ):
+            st.session_state["sidebar_page"] = initial_page
+            st.session_state["_sidebar_query_page_synced"] = initial_page
+
+        default_page_index = page_options.index(st.session_state["sidebar_page"])
+        page = st.radio("", page_options, index=default_page_index, key="sidebar_page", label_visibility="collapsed")
+
+        update_query_params_if_changed(page=page)
+        st.session_state["_sidebar_query_page_synced"] = page
         st.markdown("<div class='sidebar-footnote'>문의 : 미디어마케팅팀 데이터인사이트파트</div>", unsafe_allow_html=True)
 
     if page == "OVERVIEW":
