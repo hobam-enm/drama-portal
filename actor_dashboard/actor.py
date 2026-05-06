@@ -1599,29 +1599,10 @@ def render_reference():
     )
 
     st.markdown("<div class='spacer-lg'></div>", unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown(
-            """<div class='card'>
-<div class='rep-title'>3. 최종 합산점수</div>
-<div class='actor-sub' style='line-height: 1.72;'>
-<span style='color:#6b7280; font-size:0.85rem; font-weight:700;'>산식</span>
-<div class='formula-box'>
-<b style='color:#1f2937;'>합산점수</b> = 100 × (<br>
-&nbsp;&nbsp;0.4 × 폭발력<br>
-&nbsp;&nbsp;+ 0.3 × 안정성<br>
-&nbsp;&nbsp;+ 0.3 × 기여도<br>
-)
-</div>
-</div>
-</div>""",
-            unsafe_allow_html=True,
-        )
 
-    with c2:
-        st.markdown(
-            """<div class='card'>
-<div class='rep-title'>4. 등급 컷 기준</div>
+    st.markdown(
+        """<div class='card'>
+<div class='rep-title'>등급 컷 기준</div>
 <div class='actor-sub' style='display:flex; justify-content:space-between; line-height: 1.85;'>
 <div>
 <b>S</b> : 상위 98% 이상<br>
@@ -1639,8 +1620,8 @@ def render_reference():
 </div>
 </div>
 </div>""",
-            unsafe_allow_html=True,
-        )
+        unsafe_allow_html=True,
+    )
 
 
 def table_styler(df: pd.DataFrame):
