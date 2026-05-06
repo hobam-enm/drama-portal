@@ -2016,7 +2016,7 @@ def build_actor_ai_record(row: pd.Series, raw_df: pd.DataFrame = None, include_w
     return record
 
 
-def build_discovery_compare_payload(raw_df: pd.DataFrame, result_df: pd.DataFrame, actor_names: List[str], focus_metric: str) -> Tuple[str, pd.DataFrame]:
+def build_discovery_compare_payload(raw_df: pd.DataFrame, result_df: pd.DataFrame, actor_names: List[str], focus_metric: str, project_summary: str = '') -> Tuple[str, pd.DataFrame]:
     actor_names = [name for name in actor_names if name]
     selected_df = result_df[result_df["배우"].isin(actor_names)].copy()
     if selected_df.empty:
@@ -2031,6 +2031,8 @@ def build_discovery_compare_payload(raw_df: pd.DataFrame, result_df: pd.DataFram
         "analysis_goal": "선택 배우들의 캐스팅/마케팅 관점 비교",
         "focus_metric": focus_metric,
         "focus_guidance": DISCOVERY_FOCUS_GUIDE.get(focus_metric, DISCOVERY_FOCUS_GUIDE["균형형"]),
+        "project_summary": str(project_summary or "").strip(),
+        "project_summary_guidance": "사용자가 입력한 작품 한줄요약이 있으면, 해당 장르/톤/기획 방향과 배우 지표의 적합성을 함께 고려한다. 단, 입력된 문구를 작품 성패나 실제 편성 정보처럼 단정하지 않는다.",
         "selected_count": len(records),
         "actors": records,
         "notes": [
@@ -2048,6 +2050,7 @@ def build_discovery_explore_payload(
     conditions: Dict,
     focus_metric: str,
     analysis_limit: int,
+    project_summary: str = "",
 ) -> Tuple[str, pd.DataFrame]:
     ordered = sort_candidates_by_focus(filtered_df.copy(), focus_metric)
     analysis_df = ordered.head(int(analysis_limit)).copy()
@@ -2059,6 +2062,8 @@ def build_discovery_explore_payload(
         "user_conditions": conditions,
         "focus_metric": focus_metric,
         "focus_guidance": DISCOVERY_FOCUS_GUIDE.get(focus_metric, DISCOVERY_FOCUS_GUIDE["균형형"]),
+        "project_summary": str(project_summary or "").strip(),
+        "project_summary_guidance": "사용자가 입력한 작품 한줄요약이 있으면, 해당 장르/톤/기획 방향과 배우 지표의 적합성을 함께 고려한다. 단, 입력된 문구를 작품 성패나 실제 편성 정보처럼 단정하지 않는다.",
         "matched_count": int(len(filtered_df)),
         "analysis_limit": int(analysis_limit),
         "analysis_candidates": records,
@@ -2167,8 +2172,8 @@ def call_actor_discovery_ai(system_instruction: str, user_payload: str) -> str:
 
 
 def render_actor_ai_compare_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
-    st.markdown("<div class='detail-section-title'>AI 비교</div>", unsafe_allow_html=True)
-    st.caption("배우를 직접 선택하면, 선택 배우의 요약 지표와 전작 요약만 LLM에 전달해 비교합니다.")
+    st.markdown("<div class='detail-section-title'>비교하기</div>", unsafe_allow_html=True)
+    st.caption("배우를 직접 선택하면, 선택 배우의 요약 지표·전작 요약·작품 한줄요약을 LLM에 전달해 비교합니다.")
 
     actor_options = result_df.sort_values(["합산점수", "배우화제성"], ascending=[False, False])["배우"].tolist()
     c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.2, 1.0])
@@ -2182,6 +2187,15 @@ def render_actor_ai_compare_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
     with c4:
         focus_metric = st.selectbox("비교 관점", ["균형형", "폭발력", "안정성", "기여도"], index=0, key="ai_compare_focus")
 
+    project_summary = st.text_area(
+        "작품 한줄요약",
+        value="",
+        placeholder="예: 로맨스릴러 드라마 / 밤티재질 유치한 로맨스코미디",
+        height=72,
+        key="ai_compare_project_summary",
+        help="선택 배우를 비교할 때 장르·톤·기획 방향 적합성을 함께 보도록 LLM에 전달합니다.",
+    )
+
     selected_names = [actor1, actor2]
     if actor3 != "선택 안 함":
         selected_names.append(actor3)
@@ -2194,7 +2208,6 @@ def render_actor_ai_compare_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
             use_container_width=True,
             hide_index=True,
         )
-        render_actor_radar(result_df, comp_df["배우"].tolist(), "AI 비교 대상 · 항목별 점수", dynamic_range=True)
 
     if len(selected_names) < 2:
         st.info("비교할 배우를 2명 이상 선택해주세요.")
@@ -2203,7 +2216,7 @@ def render_actor_ai_compare_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
 
     if st.button("AI 비교 분석 시작", type="primary", use_container_width=True, key="ai_compare_button"):
         prompt = load_actor_discovery_prompt()
-        payload, payload_df = build_discovery_compare_payload(raw_df, result_df, selected_names, focus_metric)
+        payload, payload_df = build_discovery_compare_payload(raw_df, result_df, selected_names, focus_metric, project_summary)
         if payload_df.empty:
             st.warning("선택 배우 데이터를 찾지 못했습니다.")
             return
@@ -2213,8 +2226,8 @@ def render_actor_ai_compare_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
 
 
 def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
-    st.markdown("<div class='detail-section-title'>AI 탐색</div>", unsafe_allow_html=True)
-    st.caption("조건은 코드가 먼저 필터링하고, 핵심지표는 LLM이 추천 사유를 해석할 때 참고하는 관점으로만 사용합니다.")
+    st.markdown("<div class='detail-section-title'>탐색하기</div>", unsafe_allow_html=True)
+    st.caption("조건은 코드가 먼저 필터링하고, 핵심지표와 작품 한줄요약은 LLM이 추천 사유를 해석할 때 참고하는 관점으로만 사용합니다.")
 
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -2240,6 +2253,15 @@ def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
     with c6:
         analysis_limit = st.selectbox("AI 분석 후보 수", [5, 10, 20], index=1, key="ai_explore_limit")
 
+    project_summary = st.text_area(
+        "작품 한줄요약",
+        value="",
+        placeholder="예: 로맨스릴러 드라마 / 밤티재질 유치한 로맨스코미디",
+        height=72,
+        key="ai_explore_project_summary",
+        help="후보를 추천할 때 장르·톤·기획 방향 적합성을 함께 보도록 LLM에 전달합니다.",
+    )
+
     filtered = result_df.copy()
     conditions = {
         "성별": gender,
@@ -2248,6 +2270,7 @@ def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
         "핵심지표": focus_metric,
         "최소출연작품수": min_works_label,
         "AI분석후보수": int(analysis_limit),
+        "작품한줄요약": str(project_summary or "").strip(),
     }
 
     if gender != "전체":
@@ -2285,7 +2308,7 @@ def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
 
     if st.button("AI 후보 분석 시작", type="primary", use_container_width=True, key="ai_explore_button"):
         prompt = load_actor_discovery_prompt()
-        payload, payload_df = build_discovery_explore_payload(raw_df, filtered, conditions, focus_metric, int(analysis_limit))
+        payload, payload_df = build_discovery_explore_payload(raw_df, filtered, conditions, focus_metric, int(analysis_limit), project_summary)
         if payload_df.empty:
             st.warning("AI에 전달할 후보 데이터가 없습니다.")
             return
@@ -2295,8 +2318,8 @@ def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
 
 
 def render_compare(raw_df: pd.DataFrame, result_df: pd.DataFrame):
-    st.markdown("<div class='section-title'>배우 모아보기</div>", unsafe_allow_html=True)
-    tab_ai_compare, tab_ai_explore = st.tabs(["AI 비교", "AI 탐색"])
+    st.markdown("<div class='section-title'>배우 비교/탐색하기(AI)</div>", unsafe_allow_html=True)
+    tab_ai_compare, tab_ai_explore = st.tabs(["비교하기", "탐색하기"])
 
     with tab_ai_compare:
         render_actor_ai_compare_tab(raw_df, result_df)
@@ -2628,8 +2651,10 @@ def main():
 
     with st.sidebar:
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
-        page_options = ["OVERVIEW", "배우 상세보기", "배우 모아보기", "배우 조합 분석(AI)", "참고사항"]
+        page_options = ["OVERVIEW", "배우 상세보기", "배우 비교/탐색하기(AI)", "배우 조합 분석(AI)", "참고사항"]
         query_page = str(st.query_params.get("page", "OVERVIEW"))
+        if query_page == "배우 모아보기":
+            query_page = "배우 비교/탐색하기(AI)"
         initial_page = query_page if query_page in page_options else "OVERVIEW"
 
         # URL page 파라미터와 사이드바 라디오 상태를 동기화합니다.
@@ -2652,7 +2677,7 @@ def main():
         render_overview(raw_df, result_df)
     elif page == "배우 상세보기":
         render_detail(raw_df, result_df)
-    elif page == "배우 모아보기":
+    elif page == "배우 비교/탐색하기(AI)":
         render_compare(raw_df, result_df)
     elif page == "배우 조합 분석(AI)":
         render_actor_combo_ai(raw_df, result_df)
