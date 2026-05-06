@@ -1016,6 +1016,7 @@ def get_user_session_summary(user_id: str) -> Dict[str, Any]:
 APP_META_DEFAULTS = {
     "frontgate": {"title": "🧭 드라마 포털", "desc": "통합 진입 포털"},
     "data_dashboard": {"title": "📊 데이터 대시보드", "desc": "드라마 성과데이터 한눈에 비교하기"},
+    "actor_dashboard": {"title": "🎭 배우 화제성 밸런스지표", "desc": "배우별 화제성 밸런스 지표와 조합 인사이트 분석"},
     "ip_briefing": {"title": "📝 주간 IP시청자 브리핑", "desc": "IP별 주간 시청자반응 브리핑"},
     "insightlab": {"title": "🔬 드라마 인사이트랩", "desc": "드라마 관련 다양한 인사이트 보고서"},
     "chatbot": {"title": "💬 유튜브 댓글 분석 AI챗봇", "desc": "드라마 유튜브 반응 AI분석/심층대화"},
@@ -1026,6 +1027,22 @@ APP_META_DEFAULTS = {
 
 def apps_config() -> Dict[str, str]:
     return dict(sget("apps", default={}) or {})
+
+
+# frontgate에는 URL을 등록하되, 아래 앱은 마스터 계정에게만 노출합니다.
+# - actor_dashboard: 공개 전 내부 테스트/운영자 검수용
+MASTER_ONLY_APPS = {"actor_dashboard"}
+
+
+def visible_app_keys(user: Optional[Dict[str, Any]] = None, include_frontgate: bool = False) -> List[str]:
+    keys = list(apps_config().keys())
+    if not include_frontgate:
+        keys = [k for k in keys if k != "frontgate"]
+
+    if user is not None and is_master(user):
+        return keys
+
+    return [k for k in keys if k not in MASTER_ONLY_APPS]
 
 
 def app_images() -> Dict[str, str]:
@@ -1064,6 +1081,9 @@ def build_cards_html(user: Dict[str, Any], keys: List[str]) -> str:
     url_map = apps_config()
 
     for key in keys:
+        if key in MASTER_ONLY_APPS and not is_master(user):
+            continue
+
         url = str(url_map.get(key) or "").strip()
         if not url:
             continue
@@ -1100,9 +1120,9 @@ def build_cards_html(user: Dict[str, Any], keys: List[str]) -> str:
 
 
 def render_card_rows(user: Dict[str, Any]):
-    all_keys = [k for k in apps_config().keys() if k != "frontgate"]
+    all_keys = visible_app_keys(user)
     row1 = [k for k in ["data_dashboard", "ip_briefing", "insightlab"] if k in all_keys]
-    row2 = [k for k in [ "chatbot", "yt_datacrawler"] if k in all_keys]
+    row2 = [k for k in ["actor_dashboard", "chatbot", "yt_datacrawler"] if k in all_keys]
     rest = [k for k in all_keys if k not in row1 + row2]
     if rest:
         row2.extend(rest)
@@ -1254,7 +1274,8 @@ def render_login_panel():
 
 def render_signup_panel():
     st.markdown("### 📨 권한 요청")
-    app_keys = [k for k in apps_config().keys() if k != "frontgate"]
+    # 가입/권한 요청 화면에서는 마스터 전용 앱을 노출하지 않습니다.
+    app_keys = visible_app_keys(None)
     labels = {k: app_meta(k)["title"] for k in app_keys}
     with st.form("signup_request_form", clear_on_submit=True):
         name = st.text_input("이름 *")
@@ -1296,7 +1317,8 @@ def assignable_role_options(actor_user: Dict[str, Any], target_user: Optional[Di
 def render_admin_panel(admin_user: Dict[str, Any], page: str):
     st.markdown("### 🛠 관리자 페이지")
 
-    app_keys = [k for k in apps_config().keys() if k != "frontgate"]
+    # 마스터만 actor_dashboard 권한을 조회/부여할 수 있게 제한합니다.
+    app_keys = visible_app_keys(admin_user)
     app_labels = {k: app_meta(k)["title"] for k in app_keys}
     permission_options = ["user_manage", "approve_signup", "session_manage", "ytan_admin"]
 

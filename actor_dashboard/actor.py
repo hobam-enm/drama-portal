@@ -17,7 +17,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from google.oauth2.service_account import Credentials
 
-st.set_page_config(page_title="배우 다차원 화제성 지표 - 드라마", layout="wide")
+st.set_page_config(page_title="배우 화제성 밸런스 지표 - 드라마", layout="wide")
 
 
 # =====================================================
@@ -1376,7 +1376,7 @@ def render_reference():
         """<div class='card'>
 <div class='rep-title' style='font-size:1.1rem;'>1. 지표 구성 개요</div>
 <div class='actor-sub' style='line-height: 1.75; color: #374151;'>
-다차원 화제성 지표는 <b>FUNDEX 인물 화제성점수</b>를 기반으로 배우별 <b>폭발력</b>, <b>안정성</b>, <b>기여도</b>를 계산합니다.<br>
+화제성 밸런스 지표는 <b>FUNDEX 인물 화제성점수</b>를 기반으로 배우별 <b>폭발력</b>, <b>안정성</b>, <b>기여도</b>를 계산합니다.<br>
 합산점수는 <span style='color:#2456ff; font-weight:900;'>폭발력 40% · 안정성 30% · 기여도 30%</span> 가중으로 산출합니다.
 <hr style='border:none; border-top:1px solid #e5e7eb; margin:18px 0;'>
 해당 지표는 배우 화제성을 단순 총량 순위로 보지 않고, 아래 세 축으로 나누어 다각도로 평가합니다.<br>
@@ -2149,7 +2149,7 @@ def render_actor_combo_ai(raw_df: pd.DataFrame, result_df: pd.DataFrame):
 
 def main():
     inject_css()
-    st.markdown("<div class='page-title'>배우 다차원 화제성 지표 - 드라마</div>", unsafe_allow_html=True)
+    st.markdown("<div class='page-title'>배우 화제성 밸런스 지표 - 드라마</div>", unsafe_allow_html=True)
 
     raw_df = load_raw_from_gsheet()
     actor_meta_df = load_actor_meta_from_gsheet()
