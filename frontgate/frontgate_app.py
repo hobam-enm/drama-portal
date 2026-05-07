@@ -1028,7 +1028,7 @@ def get_user_session_summary(user_id: str) -> Dict[str, Any]:
 APP_META_DEFAULTS = {
     "frontgate": {"title": "🧭 드라마 포털", "desc": "통합 진입 포털"},
     "data_dashboard": {"title": "📊 데이터 대시보드", "desc": "드라마 성과데이터 한눈에 비교하기"},
-    "actor_dashboard": {"title": "🎭 배우 화제성 밸런스지표", "desc": "배우별 화제성 밸런스 지표와 조합 인사이트 분석"},
+    "actor_dashboard": {"title": "🎭 배우 화제성 밸런스지표", "desc": "화제성 밸런스 등급과 조합 인사이트 분석"},
     "ip_briefing": {"title": "📝 주간 IP시청자 브리핑", "desc": "IP별 주간 시청자반응 브리핑"},
     "insightlab": {"title": "🔬 드라마 인사이트랩", "desc": "드라마 관련 다양한 인사이트 보고서"},
     "chatbot": {"title": "💬 유튜브 댓글 분석 AI챗봇", "desc": "드라마 유튜브 반응 AI분석/심층대화"},
