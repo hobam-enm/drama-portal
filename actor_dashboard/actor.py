@@ -2311,7 +2311,7 @@ def render_actor_ai_compare_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
 
 def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
     st.markdown("<div class='detail-section-title'>탐색하기</div>", unsafe_allow_html=True)
-    st.caption("조건은 코드가 먼저 필터링하고, 핵심지표와 작품 한줄요약은 AI이 추천 사유를 해석할 때 참고하는 관점으로만 사용합니다.")
+    st.caption("조건에 맞는 배우를 AI가 화제성 밸런스지표 측면에서 추천하고 활용방안을 제시해줍니다")
 
     c1, c2, c3 = st.columns(3)
     with c1:
