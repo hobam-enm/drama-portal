@@ -530,34 +530,11 @@ def get_episode_options(df: pd.DataFrame) -> List[str]:
 
 # ===== 3.4. 통합 데이터 필터링 유틸 =====
 
-# ===== 조회수 기준 상수 =====
-VIEW_METRIC_RAW = "조회수"
-VIEW_METRIC_KO = "한글제목 조회수"
-VIEW_SEARCH_TYPE_KO = "한글제목"
-
-
-def _is_view_metric(metric_name) -> bool:
-    """코드 내부에서는 한글제목 조회수로 구분하되, 원본 RAW metric은 조회수로 유지합니다."""
-    return str(metric_name).strip() in {VIEW_METRIC_RAW, VIEW_METRIC_KO}
-
 def _get_view_data(df: pd.DataFrame) -> pd.DataFrame:
     """
-    한글제목 조회수만 필터링하고, 유튜브 PGC/UGC 규칙을 적용하는 공통 유틸.
-    - RAW metric은 '조회수'를 유지합니다.
-    - 메인 대시보드 조회수는 세부속성3 == '한글제목'인 행만 사용합니다.
-    - 사용자 화면 표기는 기존처럼 '조회수'로 유지합니다.
+    '조회수' metric만 필터링하고, 유튜브 PGC/UGC 규칙을 적용하는 공통 유틸.
     """
-    sub = df[df["metric"] == VIEW_METRIC_RAW].copy()
-    if sub.empty:
-        return sub
-
-    if "세부속성3" in sub.columns:
-        search_type = sub["세부속성3"].fillna("").astype(str).str.strip()
-        sub = sub[search_type == VIEW_SEARCH_TYPE_KO]
-    else:
-        # 세부속성3이 없으면 한글제목 조회수 기준을 확인할 수 없으므로 섞임 방지를 위해 제외합니다.
-        return sub.iloc[0:0].copy()
-
+    sub = df[df["metric"] == "조회수"].copy()
     if sub.empty:
         return sub
         
@@ -579,7 +556,7 @@ def _mean_of_ip_episode_agg(df: pd.DataFrame, metric_name: str, media=None, epis
     """IP별 (회차 단위 집계 -> IP별 평균 -> 전체 평균) 값을 계산한다.
     episode_agg: 'sum' or 'mean'
     """
-    sub = _get_view_data(df) if _is_view_metric(metric_name) else df[(df["metric"] == metric_name)].copy()
+    sub = df[(df["metric"] == metric_name)].copy()
     if media is not None:
         sub = sub[sub["매체"].isin(media)]
     if sub.empty:
@@ -674,7 +651,7 @@ def _mean_of_ip_sums_from_subset(sub: pd.DataFrame) -> float | None:
 
 
 def mean_of_ip_sums(df: pd.DataFrame, metric_name: str, media=None) -> float | None:
-    if _is_view_metric(metric_name):
+    if metric_name == "조회수":
         sub = _get_view_data(df)
     else:
         sub = df[df["metric"] == metric_name].copy()
@@ -1286,7 +1263,7 @@ def render_overview():
     tving_quick= avg_of_ip_tving_quick()        
     tving_vod  = avg_of_ip_tving_vod_weekly()   
 
-    digital_view = avg_of_ip_sums(VIEW_METRIC_KO)
+    digital_view = avg_of_ip_sums("조회수")
     digital_buzz = avg_of_ip_sums("언급량")
     f_score      = avg_of_ip_means("F_Score")
     fundex_top1  = count_ip_with_min1("F_Total")
@@ -1523,7 +1500,7 @@ def get_aired_ips(df: pd.DataFrame) -> list:
 # ===== [신규] 지표별 컷오프 기반 베이스 슬라이싱 및 라벨 생성 유틸 =====
 def _base_slice_for_metric(base_raw: pd.DataFrame, f: pd.DataFrame, metric_name: str, cutoff_kind: str = "episode", media=None) -> pd.DataFrame:
     """선택 IP(f)의 '해당 지표' 데이터가 존재하는 구간까지만 base_raw를 잘라 비교 공정성을 맞춥니다."""
-    if _is_view_metric(metric_name):
+    if metric_name == "조회수":
         sub_ip = _get_view_data(f)
     else:
         sub_ip = f[f["metric"] == metric_name].copy()
@@ -1558,7 +1535,7 @@ def _cutoff_label_for_metric(f: pd.DataFrame, metric_name: str, cutoff_kind: str
     if f is None or f.empty:
         return None
 
-    if _is_view_metric(metric_name):
+    if metric_name == "조회수":
         sub = _get_view_data(f)
     else:
         sub = f[f["metric"] == metric_name].copy()
@@ -1796,7 +1773,7 @@ def render_ip_detail():
     def _series_ip_metric(base_df: pd.DataFrame, metric_name: str, mode: str = "mean", media: List[str] | None = None):
         if media is not None and metric_name == "시청인구" and set(media) == {"TVING VOD", "TVING QUICK"}:
             return _series_tving_vod_combined_on_vod_eps(base_df)
-        if _is_view_metric(metric_name): sub = _get_view_data(base_df)
+        if metric_name == "조회수": sub = _get_view_data(base_df)
         else: sub = _metric_filter(base_df, metric_name).copy()
         if media is not None: sub = sub[sub["매체"].isin(media)]
         if sub.empty: return pd.Series(dtype=float)
@@ -1971,7 +1948,7 @@ def render_ip_detail():
     val_wavve = mean_of_ip_episode_sum(f, "시청자수", ["웨이브"])
     val_netflix_best = _min_of_ip_metric(f, "N_W순위")
     val_buzz = mean_of_ip_sums(f, "언급량")
-    val_view = mean_of_ip_sums(f, VIEW_METRIC_KO)
+    val_view = mean_of_ip_sums(f, "조회수")
     val_topic_min = _min_of_ip_metric(f, "F_Total")
     val_topic_avg = _mean_like_rating(f, "F_score")
 
@@ -1986,7 +1963,7 @@ def render_ip_detail():
     base_netflix_series = _series_ip_metric(_base_slice_for_metric(base_raw, f, "N_W순위", "week"), "N_W순위", mode="min")
     base_netflix_best = float(base_netflix_series.mean()) if not base_netflix_series.empty else None
     base_buzz = mean_of_ip_sums(_base_slice_for_metric(base_raw, f, "언급량", "week"), "언급량")
-    base_view = mean_of_ip_sums(_base_slice_for_metric(base_raw, f, VIEW_METRIC_KO, "week"), VIEW_METRIC_KO)
+    base_view = mean_of_ip_sums(_base_slice_for_metric(base_raw, f, "조회수", "week"), "조회수")
     base_topic_min_series = _series_ip_metric(_base_slice_for_metric(base_raw, f, "F_Total", "week"), "F_Total", mode="min")
     base_topic_min = float(base_topic_min_series.mean()) if not base_topic_min_series.empty else None
     base_topic_avg = _mean_like_rating(_base_slice_for_metric(base_raw, f, "F_score", "week"), "F_score")
@@ -2010,7 +1987,7 @@ def render_ip_detail():
 
     rk_netflix = _rank_within_program(_base_slice_for_metric(base_raw, f, "N_W순위", "week"), "N_W순위", ip_selected, val_netflix_best, mode="min", media=None, low_is_good=True)
     rk_buzz  = _rank_within_program(_base_slice_for_metric(base_raw, f, "언급량", "week"), "언급량",   ip_selected, val_buzz,  mode="sum",        media=None)
-    rk_view  = _rank_within_program(_base_slice_for_metric(base_raw, f, VIEW_METRIC_KO, "week"), VIEW_METRIC_KO,   ip_selected, val_view,  mode="sum",        media=None)
+    rk_view  = _rank_within_program(_base_slice_for_metric(base_raw, f, "조회수", "week"), "조회수",   ip_selected, val_view,  mode="sum",        media=None)
     rk_fmin  = _rank_within_program(_base_slice_for_metric(base_raw, f, "F_Total", "week"), "F_Total",  ip_selected, val_topic_min, mode="min",   media=None, low_is_good=True)
     rk_fscr  = _rank_within_program(_base_slice_for_metric(base_raw, f, "F_score", "week"), "F_score",  ip_selected, val_topic_avg, mode="mean",  media=None, low_is_good=False)
 
@@ -2019,7 +1996,7 @@ def render_ip_detail():
     detail_live  = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "시청인구", "episode"), "시청인구", ip_selected, mode="ep_sum_mean", media=["TVING LIVE"])
     detail_quick = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "시청인구", "episode"), "시청인구", ip_selected, mode="ep_sum_mean", media=["TVING QUICK"])
     detail_vod   = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "시청인구", "episode", media=["TVING VOD"]), "시청인구", ip_selected, mode="ep_sum_mean", media=["TVING VOD", "TVING QUICK"])
-    detail_view  = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, VIEW_METRIC_KO, "week"), VIEW_METRIC_KO, ip_selected, mode="sum")
+    detail_view  = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "조회수", "week"), "조회수", ip_selected, mode="sum")
     detail_buzz  = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "언급량", "week"), "언급량", ip_selected, mode="sum")
     detail_fscr  = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "F_score", "week"), "F_score", ip_selected, mode="mean")
     detail_wavve = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "시청자수", "episode"), "시청자수", ip_selected, mode="ep_sum_mean", media=["웨이브"])
@@ -2039,7 +2016,7 @@ def render_ip_detail():
     kpi_with_rank(c5, "▶️ 티빙 주간 VOD UV",  val_vod,   base_vod,   rk_vod,   prog_label, intlike=True, cutoff_label=cut_vod, detail_rows=detail_vod)
 
     # ===== KPI 배치 (Row 2) =====
-    cut_view  = _cutoff_label_for_metric(f, VIEW_METRIC_KO,  "week")
+    cut_view  = _cutoff_label_for_metric(f, "조회수",  "week")
     cut_buzz  = _cutoff_label_for_metric(f, "언급량",  "week")
     cut_fscr  = _cutoff_label_for_metric(f, "F_score", "week")
     cut_wavve = _cutoff_label_for_metric(f, "시청자수", "episode", media=["웨이브"])
@@ -2753,7 +2730,7 @@ def get_agg_kpis_for_ip_page4(df_ip: pd.DataFrame) -> Dict[str, float | None]:
     kpis["H시청률"] = mean_of_ip_episode_mean(df_ip, "H시청률")
     kpis["TVING VOD"] = mean_tving_vod_combined_on_vod_eps(df_ip)
     kpis["TVING LIVE"] = mean_of_ip_episode_sum(df_ip, "시청인구", ["TVING LIVE"])
-    kpis["디지털 조회수"] = mean_of_ip_sums(df_ip, VIEW_METRIC_KO)
+    kpis["디지털 조회수"] = mean_of_ip_sums(df_ip, "조회수")
     kpis["디지털 언급량"] = mean_of_ip_sums(df_ip, "언급량")
     kpis["화제성 점수"] = mean_of_ip_episode_mean(df_ip, "F_Score")
     return kpis
@@ -2970,7 +2947,7 @@ def _render_unified_charts(df_target, df_comp, target_name, comp_name, kpi_perce
         radar_map = {
             "T시청률": "타깃시청률", "H시청률": "가구시청률", 
             "TVING LIVE": "티빙 LIVE", "TVING VOD": "티빙 VOD", 
-            "디지털 조회수": VIEW_METRIC_KO, "디지털 언급량": "언급량", "화제성 점수": "화제성"
+            "디지털 조회수": "조회수", "디지털 언급량": "언급량", "화제성 점수": "화제성"
         }
         radar_metrics = list(radar_map.keys())
         radar_labels = list(radar_map.values())
@@ -3119,7 +3096,7 @@ def _render_unified_charts(df_target, df_comp, target_name, comp_name, kpi_perce
     col_dig_view, col_dig_buzz = st.columns(2)
 
     def _get_pie_data(df_src, metric):
-        if _is_view_metric(metric):
+        if metric == "조회수":
             sub = _get_view_data(df_src)
         else:
             sub = df_src[df_src["metric"] == metric].copy()
@@ -3163,8 +3140,8 @@ def _render_unified_charts(df_target, df_comp, target_name, comp_name, kpi_perce
 
     with col_dig_view:
         st.markdown("###### 👀 디지털 조회수 비교")
-        pie_t = _get_pie_data(df_target, VIEW_METRIC_KO)
-        pie_c = _get_pie_data(df_comp,   VIEW_METRIC_KO)
+        pie_t = _get_pie_data(df_target, "조회수")
+        pie_c = _get_pie_data(df_comp,   "조회수")
         if pie_t.empty and pie_c.empty: st.info("데이터 없음")
         else:
             fig_pie = _draw_scaled_donuts_fixed_color(pie_t, pie_c, "조회수", target_name, comp_name)
@@ -3482,7 +3459,7 @@ METRICS_DEF_BROADCAST = [
 
 # 디지털용 정의 (Display, Metric, AggFunc, UseSlope)
 METRICS_DEF_DIGITAL = [
-    ("조회수", VIEW_METRIC_KO, "sum", True),
+    ("조회수", "조회수", "sum", True),
     ("화제성", "F_Score", "mean", True),
 ]
 
@@ -3796,7 +3773,7 @@ def render_growth_score():
         
         # --- [Logic] 디지털용 계산 헬퍼 (로컬 정의) ---
         def _get_full_series_digital(ip_df, metric_name, mtype):
-            if _is_view_metric(metric_name): sub = _get_view_data(ip_df)
+            if metric_name == "조회수": sub = _get_view_data(ip_df)
             else: sub = ip_df[ip_df["metric"] == metric_name].copy()
             sub["value"] = pd.to_numeric(sub["value"], errors="coerce").replace(0, np.nan)
             sub = sub.dropna(subset=["value", "회차_numeric"])
@@ -4127,7 +4104,7 @@ def render_pre_launch_analysis():
     def _draw_trend_line_chart(metric_name, title, target_weeks):
         def _fetch_trend_data(df_src, m_name):
             if df_src.empty: return pd.Series(dtype=float)
-            if _is_view_metric(m_name):
+            if m_name == "조회수":
                 sub = _get_view_data(df_src)
             else:
                 sub = df_src[df_src["metric"] == m_name].copy()
@@ -4143,7 +4120,7 @@ def render_pre_launch_analysis():
             return grp.sort_index(key=lambda x: x.map(sorter))
 
         def _format_text_values(series):
-            if _is_view_metric(metric_name):
+            if metric_name == "조회수":
                 return [f"{int(v/10000)}만" if v >= 10000 else f"{int(v)}" for v in series.values]
             if metric_name == "언급량":
                 return [f"{v:,.0f}" for v in series.values]
@@ -4176,7 +4153,7 @@ def render_pre_launch_analysis():
 
         fig = go.Figure()
 
-        if _is_view_metric(metric_name):
+        if metric_name == "조회수":
             custom_target = [_fmt_view_detail(v) for v in s_target.values]
             custom_group  = [_fmt_view_detail(v) for v in s_group.values]
             custom_prev   = [_fmt_view_detail(v) for v in s_prev.values]
@@ -4282,7 +4259,7 @@ def render_pre_launch_analysis():
 
     st.markdown("###### 💻 사전 디지털 반응 (W-6 ~ W-1)")
     c_d1, c_d2 = st.columns(2)
-    with c_d1: _draw_trend_line_chart(VIEW_METRIC_KO, "조회수 합계", WEEKS_DIGITAL)
+    with c_d1: _draw_trend_line_chart("조회수", "조회수 합계", WEEKS_DIGITAL)
     with c_d2: _draw_trend_line_chart("언급량", "언급량 합계", WEEKS_DIGITAL)
 
 
@@ -4401,18 +4378,18 @@ def render_pre_launch_analysis():
         view_mom = v_pv.get("W-1", 0) - v_pv.get("W-3", 0)
         buzz_mom = b_pv.get("W-1", 0) - b_pv.get("W-3", 0)
 
-        dig_feats[f"log1p_{VIEW_METRIC_KO}_sum_W-6_W-1"] = np.log1p(view_sum.clip(lower=0))
+        dig_feats["log1p_조회수_sum_W-6_W-1"] = np.log1p(view_sum.clip(lower=0))
         dig_feats["log1p_언급량_sum_W-6_W-1"] = np.log1p(buzz_sum.clip(lower=0))
-        dig_feats[f"log1p_{VIEW_METRIC_KO}_level_W-1"]   = np.log1p(pd.Series(view_w1, index=meta.index).clip(lower=0))
+        dig_feats["log1p_조회수_level_W-1"]   = np.log1p(pd.Series(view_w1, index=meta.index).clip(lower=0))
         dig_feats["log1p_언급량_level_W-1"]   = np.log1p(pd.Series(buzz_w1, index=meta.index).clip(lower=0))
 
         # 모멘텀은 음수도 가능하므로 signed-log1p로 변환
-        dig_feats[f"slog_{VIEW_METRIC_KO}_mom_W-1_minus_W-3"] = np.sign(view_mom) * np.log1p(np.abs(view_mom))
+        dig_feats["slog_조회수_mom_W-1_minus_W-3"] = np.sign(view_mom) * np.log1p(np.abs(view_mom))
         dig_feats["slog_언급량_mom_W-1_minus_W-3"] = np.sign(buzz_mom) * np.log1p(np.abs(buzz_mom))
 
         # 데이터 커버리지(주차가 덜 쌓인 IP에 대한 과대추정 완화용)
         # 0이 '실제로 0'일 수도 있지만, 사전 구간에서 완전 0이 반복되면 정보가 부족한 케이스가 많아 보정에 도움이 됨.
-        dig_feats[f"{VIEW_METRIC_KO}_week_coverage_W-6_W-1"] = (v_pv.fillna(0) > 0).mean(axis=1)
+        dig_feats["조회수_week_coverage_W-6_W-1"] = (v_pv.fillna(0) > 0).mean(axis=1)
         dig_feats["언급량_week_coverage_W-6_W-1"] = (b_pv.fillna(0) > 0).mean(axis=1)
 
         # ---- (4) 타깃: 1주차 화제성 점수(F_Score) ----
@@ -4585,7 +4562,6 @@ def render_pre_launch_analysis():
                         s = s.replace("_W-6_W-1", " (W-6~W-1)")
                         s = s.replace("_W-1_minus_W-3", " (W-1 - W-3)")
                         s = s.replace("_W-1", " (W-1)")
-                        s = s.replace(VIEW_METRIC_KO, "조회수")
                         s = s.replace("_", " ")
                         s = s.replace("sum", "총량").replace("level", "마지막값").replace("mom", "최근변화").replace("slope", "추세").replace("minus", "-")
                         return s
@@ -4712,7 +4688,7 @@ def render_pre_launch_analysis():
                 v = _get_view_data(_df).copy()
                 v = v[v["주차"].astype(str).apply(lambda w: _week_leq(str(w), cutoff))]
                 v["val"] = pd.to_numeric(v.get("value"), errors="coerce").fillna(0)
-                v["metric"] = VIEW_METRIC_KO
+                v["metric"] = "조회수"
                 frames.append(v[["IP","주차","metric","val"]])
             except Exception:
                 pass
@@ -4742,7 +4718,7 @@ def render_pre_launch_analysis():
                 mom = float(last - ref)
                 slope = _calc_slope(vals)
 
-                if _is_view_metric(m) or m == "언급량":
+                if m in ["조회수", "언급량"]:
                     row[f"사전:{m}_총량(log)"] = float(np.log1p(sm))
                     row[f"사전:{m}_수준({cutoff},log)"] = float(np.log1p(last))
                     row[f"사전:{m}_최근변화({cutoff},log)"] = float(np.sign(mom) * np.log1p(abs(mom)))
