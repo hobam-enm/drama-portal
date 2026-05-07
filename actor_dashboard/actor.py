@@ -2258,7 +2258,6 @@ def call_actor_discovery_ai(system_instruction: str, user_payload: str) -> str:
 
 def render_actor_ai_compare_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
     st.markdown("<div class='detail-section-title'>비교하기</div>", unsafe_allow_html=True)
-    st.caption("배우를 직접 선택하면, 선택 배우의 요약 지표·전작 요약·작품 한줄요약을 LLM에 전달해 비교합니다.")
 
     actor_options = result_df.sort_values(["합산점수", "배우화제성"], ascending=[False, False])["배우"].tolist()
     c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.2, 1.0])
@@ -2278,7 +2277,7 @@ def render_actor_ai_compare_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
         placeholder="예: 30대 여성 타깃의 현실 공감형 로맨스 드라마",
         height=72,
         key="ai_compare_project_summary",
-        help="선택 배우를 비교할 때 장르·톤·기획 방향 적합성을 함께 보도록 LLM에 전달합니다.",
+        help="선택 배우를 비교할 때 장르·톤·기획 방향 적합성을 함께 보도록 AI에 전달합니다.",
     )
 
     selected_names = [actor1, actor2]
@@ -2312,7 +2311,7 @@ def render_actor_ai_compare_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
 
 def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
     st.markdown("<div class='detail-section-title'>탐색하기</div>", unsafe_allow_html=True)
-    st.caption("조건은 코드가 먼저 필터링하고, 핵심지표와 작품 한줄요약은 LLM이 추천 사유를 해석할 때 참고하는 관점으로만 사용합니다.")
+    st.caption("조건은 코드가 먼저 필터링하고, 핵심지표와 작품 한줄요약은 AI이 추천 사유를 해석할 때 참고하는 관점으로만 사용합니다.")
 
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -2342,7 +2341,7 @@ def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
         placeholder="예: 30대 여성 타깃의 현실 공감형 로맨스 드라마",
         height=72,
         key="ai_explore_project_summary",
-        help="후보를 추천할 때 장르·톤·기획 방향 적합성을 함께 보도록 LLM에 전달합니다.",
+        help="후보를 추천할 때 장르·톤·기획 방향 적합성을 함께 보도록 AI에 전달합니다.",
     )
 
     filtered = result_df.copy()
@@ -2409,7 +2408,7 @@ def render_actor_ai_explore_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
 
 def render_actor_partner_search_tab(raw_df: pd.DataFrame, result_df: pd.DataFrame):
     st.markdown("<div class='detail-section-title'>상대배우 찾기</div>", unsafe_allow_html=True)
-    st.caption("이미 확정된 배우를 기준점으로 두고, 조건에 맞는 상대 배우 후보를 LLM이 조합 관점에서 추천합니다.")
+    st.caption("이미 확정된 배우를 기준점으로 두고, 조건에 맞는 상대 배우 후보를 AI가 조합 관점에서 추천합니다.")
 
     actor_options = result_df.sort_values(["합산점수", "배우화제성"], ascending=[False, False])["배우"].tolist()
     default_fixed = actor_options[:1]
@@ -2468,7 +2467,7 @@ def render_actor_partner_search_tab(raw_df: pd.DataFrame, result_df: pd.DataFram
         placeholder="예: 30대 여성 타깃의 현실 공감형 로맨스 드라마",
         height=72,
         key="ai_partner_project_summary",
-        help="확정 배우와 상대 후보의 장르·톤·기획 방향 적합성을 함께 보도록 LLM에 전달합니다.",
+        help="확정 배우와 상대 후보의 장르·톤·기획 방향 적합성을 함께 보도록 AI에 전달합니다.",
     )
 
     if not fixed_names:
