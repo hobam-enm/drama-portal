@@ -533,19 +533,28 @@ def get_episode_options(df: pd.DataFrame) -> List[str]:
 # ===== 조회수 기준 상수 =====
 VIEW_METRIC_RAW = "조회수"
 VIEW_METRIC_KO = "한글제목 조회수"
+VIEW_METRIC_EN = "영문제목 조회수"
 VIEW_SEARCH_TYPE_KO = "한글제목"
+VIEW_SEARCH_TYPE_EN = "영어제목"
 
 
 def _is_view_metric(metric_name) -> bool:
-    """코드 내부에서는 한글제목 조회수로 구분하되, 원본 RAW metric은 조회수로 유지합니다."""
-    return str(metric_name).strip() in {VIEW_METRIC_RAW, VIEW_METRIC_KO}
+    """코드 내부에서는 한글/영문 제목 조회수를 분리하되, 원본 RAW metric은 조회수로 유지합니다."""
+    return str(metric_name).strip() in {VIEW_METRIC_RAW, VIEW_METRIC_KO, VIEW_METRIC_EN}
 
-def _get_view_data(df: pd.DataFrame) -> pd.DataFrame:
+def _view_search_type_for_metric(metric_name) -> str:
+    """내부 조회수 metric명에 따라 세부속성3 검색 기준을 반환합니다."""
+    return VIEW_SEARCH_TYPE_EN if str(metric_name).strip() == VIEW_METRIC_EN else VIEW_SEARCH_TYPE_KO
+
+def _get_view_data(df: pd.DataFrame, search_type_value: str = VIEW_SEARCH_TYPE_KO) -> pd.DataFrame:
     """
-    한글제목 조회수만 필터링하고, 유튜브 PGC/UGC 규칙을 적용하는 공통 유틸.
+    제목 기준별 조회수만 필터링하는 공통 유틸.
     - RAW metric은 '조회수'를 유지합니다.
-    - 메인 대시보드 조회수는 세부속성3 == '한글제목'인 행만 사용합니다.
-    - 사용자 화면 표기는 기존처럼 '조회수'로 유지합니다.
+    - 한글제목 조회수는 세부속성3 == '한글제목'인 행만 사용합니다.
+    - 영문제목 조회수는 세부속성3 == '영어제목'인 행만 사용합니다.
+    - 한글제목 조회수만 유튜브 세부속성1 PGC/UGC 제한을 적용합니다.
+    - 영문제목 조회수는 유튜브여도 세부속성1 조건을 적용하지 않습니다.
+    - 사용자 화면의 기존 조회수 표기는 그대로 유지합니다.
     """
     sub = df[df["metric"] == VIEW_METRIC_RAW].copy()
     if sub.empty:
@@ -553,20 +562,26 @@ def _get_view_data(df: pd.DataFrame) -> pd.DataFrame:
 
     if "세부속성3" in sub.columns:
         search_type = sub["세부속성3"].fillna("").astype(str).str.strip()
-        sub = sub[search_type == VIEW_SEARCH_TYPE_KO]
+        sub = sub[search_type == search_type_value]
     else:
-        # 세부속성3이 없으면 한글제목 조회수 기준을 확인할 수 없으므로 섞임 방지를 위해 제외합니다.
+        # 세부속성3이 없으면 제목 기준을 확인할 수 없으므로 섞임 방지를 위해 제외합니다.
         return sub.iloc[0:0].copy()
 
     if sub.empty:
         return sub
-        
-    if "매체" in sub.columns and "세부속성1" in sub.columns:
+
+    # 한글제목 조회수만 기존 유튜브 PGC/UGC 제한을 유지합니다.
+    # 영문제목 조회수는 유튜브여도 세부속성1 조건 없이 포함합니다.
+    if search_type_value == VIEW_SEARCH_TYPE_KO and "매체" in sub.columns and "세부속성1" in sub.columns:
         yt_mask = (sub["매체"] == "유튜브")
         attr_mask = sub["세부속성1"].isin(["PGC", "UGC"])
         sub = sub[~yt_mask | (yt_mask & attr_mask)]
     
     return sub
+
+def _get_view_data_for_metric(df: pd.DataFrame, metric_name) -> pd.DataFrame:
+    """VIEW_METRIC_KO/VIEW_METRIC_EN 내부명에 맞는 조회수 subset을 반환합니다."""
+    return _get_view_data(df, _view_search_type_for_metric(metric_name))
 
 # ===== 3.5. 집계 계산 유틸 =====
 
@@ -579,7 +594,7 @@ def _mean_of_ip_episode_agg(df: pd.DataFrame, metric_name: str, media=None, epis
     """IP별 (회차 단위 집계 -> IP별 평균 -> 전체 평균) 값을 계산한다.
     episode_agg: 'sum' or 'mean'
     """
-    sub = _get_view_data(df) if _is_view_metric(metric_name) else df[(df["metric"] == metric_name)].copy()
+    sub = _get_view_data_for_metric(df, metric_name) if _is_view_metric(metric_name) else df[(df["metric"] == metric_name)].copy()
     if media is not None:
         sub = sub[sub["매체"].isin(media)]
     if sub.empty:
@@ -675,7 +690,7 @@ def _mean_of_ip_sums_from_subset(sub: pd.DataFrame) -> float | None:
 
 def mean_of_ip_sums(df: pd.DataFrame, metric_name: str, media=None) -> float | None:
     if _is_view_metric(metric_name):
-        sub = _get_view_data(df)
+        sub = _get_view_data_for_metric(df, metric_name)
     else:
         sub = df[df["metric"] == metric_name].copy()
 
@@ -1287,6 +1302,7 @@ def render_overview():
     tving_vod  = avg_of_ip_tving_vod_weekly()   
 
     digital_view = avg_of_ip_sums(VIEW_METRIC_KO)
+    digital_view_en = avg_of_ip_sums(VIEW_METRIC_EN)
     digital_buzz = avg_of_ip_sums("언급량")
     f_score      = avg_of_ip_means("F_Score")
     fundex_top1  = count_ip_with_min1("F_Total")
@@ -1300,21 +1316,16 @@ def render_overview():
     kpi(c2, "🏠 가구 시청률", fmt(h_rating, digits=3))
     kpi(c3, "📺 티빙 LIVE UV", fmt(tving_live, intlike=True))
     kpi(c4, "⚡ 티빙 당일 VOD UV", fmt(tving_quick, intlike=True)) 
-    kpi(c5, "▶️ 티빙 주간 VOD UV", fmt(tving_vod, intlike=True))   
-    
-    # 빈 6번째 열에 보이지 않는 kpi-card를 삽입하여 CSS :has(.kpi-card) 예외 룰을 정상 작동시킵니다.
-    with c6:
-        st.markdown("<div class='kpi-card' style='visibility:hidden; border:none; box-shadow:none;'></div>", unsafe_allow_html=True)
+    kpi(c5, "▶️ 티빙 주간 VOD UV", fmt(tving_vod, intlike=True))
+    kpi_tooltip(c6, "⚓ 앵커드라마", f"{anchor_total}작품", anchor_tooltip)
     
     # --- 2행 ---
     kpi(c7, "👀 디지털 조회수", fmt(digital_view, intlike=True))
-    kpi(c8, "💬 디지털 언급량", fmt(digital_buzz, intlike=True))
-    kpi(c9, "🔥 화제성 점수",  fmt(f_score, intlike=True))
-    kpi(c10, "🥇 펀덱스 1위", f"{fundex_top1}작품")
-    
-    # 신규 지표(툴팁 적용)
-    kpi_tooltip(c11, "🏆 펀덱스 Top3 랭크인", f"{fundex_top3_count}회", fundex_top3_tooltip)
-    kpi_tooltip(c12, "⚓ 앵커드라마", f"{anchor_total}작품", anchor_tooltip)
+    kpi(c8, "🌐 디지털 조회수(영제)", fmt(digital_view_en, intlike=True))
+    kpi(c9, "💬 디지털 언급량", fmt(digital_buzz, intlike=True))
+    kpi(c10, "🔥 화제성 점수",  fmt(f_score, intlike=True))
+    kpi(c11, "🥇 펀덱스 1위", f"{fundex_top1}작품")
+    kpi_tooltip(c12, "🏆 펀덱스 Top3 랭크인", f"{fundex_top3_count}회", fundex_top3_tooltip)
 
     st.divider()
 
@@ -1524,7 +1535,7 @@ def get_aired_ips(df: pd.DataFrame) -> list:
 def _base_slice_for_metric(base_raw: pd.DataFrame, f: pd.DataFrame, metric_name: str, cutoff_kind: str = "episode", media=None) -> pd.DataFrame:
     """선택 IP(f)의 '해당 지표' 데이터가 존재하는 구간까지만 base_raw를 잘라 비교 공정성을 맞춥니다."""
     if _is_view_metric(metric_name):
-        sub_ip = _get_view_data(f)
+        sub_ip = _get_view_data_for_metric(f, metric_name)
     else:
         sub_ip = f[f["metric"] == metric_name].copy()
 
@@ -1559,7 +1570,7 @@ def _cutoff_label_for_metric(f: pd.DataFrame, metric_name: str, cutoff_kind: str
         return None
 
     if _is_view_metric(metric_name):
-        sub = _get_view_data(f)
+        sub = _get_view_data_for_metric(f, metric_name)
     else:
         sub = f[f["metric"] == metric_name].copy()
 
@@ -1796,7 +1807,7 @@ def render_ip_detail():
     def _series_ip_metric(base_df: pd.DataFrame, metric_name: str, mode: str = "mean", media: List[str] | None = None):
         if media is not None and metric_name == "시청인구" and set(media) == {"TVING VOD", "TVING QUICK"}:
             return _series_tving_vod_combined_on_vod_eps(base_df)
-        if _is_view_metric(metric_name): sub = _get_view_data(base_df)
+        if _is_view_metric(metric_name): sub = _get_view_data_for_metric(base_df, metric_name)
         else: sub = _metric_filter(base_df, metric_name).copy()
         if media is not None: sub = sub[sub["매체"].isin(media)]
         if sub.empty: return pd.Series(dtype=float)
@@ -1972,6 +1983,7 @@ def render_ip_detail():
     val_netflix_best = _min_of_ip_metric(f, "N_W순위")
     val_buzz = mean_of_ip_sums(f, "언급량")
     val_view = mean_of_ip_sums(f, VIEW_METRIC_KO)
+    val_view_en = mean_of_ip_sums(f, VIEW_METRIC_EN)
     val_topic_min = _min_of_ip_metric(f, "F_Total")
     val_topic_avg = _mean_like_rating(f, "F_score")
 
@@ -1987,6 +1999,7 @@ def render_ip_detail():
     base_netflix_best = float(base_netflix_series.mean()) if not base_netflix_series.empty else None
     base_buzz = mean_of_ip_sums(_base_slice_for_metric(base_raw, f, "언급량", "week"), "언급량")
     base_view = mean_of_ip_sums(_base_slice_for_metric(base_raw, f, VIEW_METRIC_KO, "week"), VIEW_METRIC_KO)
+    base_view_en = mean_of_ip_sums(_base_slice_for_metric(base_raw, f, VIEW_METRIC_EN, "week"), VIEW_METRIC_EN)
     base_topic_min_series = _series_ip_metric(_base_slice_for_metric(base_raw, f, "F_Total", "week"), "F_Total", mode="min")
     base_topic_min = float(base_topic_min_series.mean()) if not base_topic_min_series.empty else None
     base_topic_avg = _mean_like_rating(_base_slice_for_metric(base_raw, f, "F_score", "week"), "F_score")
@@ -2011,6 +2024,7 @@ def render_ip_detail():
     rk_netflix = _rank_within_program(_base_slice_for_metric(base_raw, f, "N_W순위", "week"), "N_W순위", ip_selected, val_netflix_best, mode="min", media=None, low_is_good=True)
     rk_buzz  = _rank_within_program(_base_slice_for_metric(base_raw, f, "언급량", "week"), "언급량",   ip_selected, val_buzz,  mode="sum",        media=None)
     rk_view  = _rank_within_program(_base_slice_for_metric(base_raw, f, VIEW_METRIC_KO, "week"), VIEW_METRIC_KO,   ip_selected, val_view,  mode="sum",        media=None)
+    rk_view_en = _rank_within_program(_base_slice_for_metric(base_raw, f, VIEW_METRIC_EN, "week"), VIEW_METRIC_EN, ip_selected, val_view_en, mode="sum", media=None)
     rk_fmin  = _rank_within_program(_base_slice_for_metric(base_raw, f, "F_Total", "week"), "F_Total",  ip_selected, val_topic_min, mode="min",   media=None, low_is_good=True)
     rk_fscr  = _rank_within_program(_base_slice_for_metric(base_raw, f, "F_score", "week"), "F_score",  ip_selected, val_topic_avg, mode="mean",  media=None, low_is_good=False)
 
@@ -2020,6 +2034,7 @@ def render_ip_detail():
     detail_quick = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "시청인구", "episode"), "시청인구", ip_selected, mode="ep_sum_mean", media=["TVING QUICK"])
     detail_vod   = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "시청인구", "episode", media=["TVING VOD"]), "시청인구", ip_selected, mode="ep_sum_mean", media=["TVING VOD", "TVING QUICK"])
     detail_view  = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, VIEW_METRIC_KO, "week"), VIEW_METRIC_KO, ip_selected, mode="sum")
+    detail_view_en = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, VIEW_METRIC_EN, "week"), VIEW_METRIC_EN, ip_selected, mode="sum")
     detail_buzz  = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "언급량", "week"), "언급량", ip_selected, mode="sum")
     detail_fscr  = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "F_score", "week"), "F_score", ip_selected, mode="mean")
     detail_wavve = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "시청자수", "episode"), "시청자수", ip_selected, mode="ep_sum_mean", media=["웨이브"])
@@ -2040,24 +2055,18 @@ def render_ip_detail():
 
     # ===== KPI 배치 (Row 2) =====
     cut_view  = _cutoff_label_for_metric(f, VIEW_METRIC_KO,  "week")
+    cut_view_en = _cutoff_label_for_metric(f, VIEW_METRIC_EN, "week")
     cut_buzz  = _cutoff_label_for_metric(f, "언급량",  "week")
     cut_fscr  = _cutoff_label_for_metric(f, "F_score", "week")
     cut_wavve = _cutoff_label_for_metric(f, "시청자수", "episode", media=["웨이브"])
 
     c6, c7, c8, c9, c10 = st.columns(5)
     kpi_with_rank(c6, "👀 디지털 조회수", val_view, base_view, rk_view, prog_label, intlike=True, cutoff_label=cut_view, detail_rows=detail_view)
-    kpi_with_rank(c7, "💬 디지털 언급량", val_buzz, base_buzz, rk_buzz, prog_label, intlike=True, cutoff_label=cut_buzz, detail_rows=detail_buzz)
-    
-    with c8:
-        v = val_topic_min
-        main_val = "–" if (v is None or pd.isna(v)) else f"{int(round(v)):,d}위"
-        st.markdown(
-            f"<div class='kpi-card'><div class='kpi-title'>🏆 최고 화제성 순위</div>"
-            f"<div class='kpi-value'>{main_val}</div>{sublines_dummy()}</div>",
-            unsafe_allow_html=True
-        )
+    kpi_with_rank(c7, "🌐 디지털 조회수(영제)", val_view_en, base_view_en, rk_view_en, prog_label, intlike=True, cutoff_label=cut_view_en, detail_rows=detail_view_en)
+    kpi_with_rank(c8, "💬 디지털 언급량", val_buzz, base_buzz, rk_buzz, prog_label, intlike=True, cutoff_label=cut_buzz, detail_rows=detail_buzz)
 
-    kpi_with_rank(c9, "🔥 화제성 점수", val_topic_avg, base_topic_avg, rk_fscr, prog_label, intlike=True, cutoff_label=cut_fscr, detail_rows=detail_fscr)
+    topic_rank_suffix = "" if (val_topic_min is None or pd.isna(val_topic_min)) else f" <span style='font-size:15px;font-weight:700;color:#6b7280;'>({int(round(val_topic_min)):,d}위/최고)</span>"
+    kpi_with_rank(c9, "🔥 화제성 점수", val_topic_avg, base_topic_avg, rk_fscr, prog_label, intlike=True, cutoff_label=cut_fscr, detail_rows=detail_fscr, value_suffix=topic_rank_suffix)
 
     with c10:
         if val_wavve is not None and not pd.isna(val_wavve):
@@ -3796,7 +3805,7 @@ def render_growth_score():
         
         # --- [Logic] 디지털용 계산 헬퍼 (로컬 정의) ---
         def _get_full_series_digital(ip_df, metric_name, mtype):
-            if _is_view_metric(metric_name): sub = _get_view_data(ip_df)
+            if _is_view_metric(metric_name): sub = _get_view_data_for_metric(ip_df, metric_name)
             else: sub = ip_df[ip_df["metric"] == metric_name].copy()
             sub["value"] = pd.to_numeric(sub["value"], errors="coerce").replace(0, np.nan)
             sub = sub.dropna(subset=["value", "회차_numeric"])
