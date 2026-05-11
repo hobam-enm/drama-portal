@@ -313,6 +313,16 @@ MAX_TOTAL_COMMENTS   = int(_chatbot_secrets.get("max_total_comments", 120_000) o
 MAX_COMMENTS_PER_VID = int(_chatbot_secrets.get("max_comments_per_vid", 4_000) or 4_000)
 CACHE_TTL_MINUTES    = int(_chatbot_secrets.get("cache_ttl_minutes", 20) or 20)
 
+# UGC 검색 수집 한도 및 강제 포함 채널
+UGC_SEARCH_LIMIT = int(_chatbot_secrets.get("ugc_search_limit", 200) or 200)
+FORCE_CHANNEL_SEARCH_LIMIT = int(_chatbot_secrets.get("force_channel_search_limit", UGC_SEARCH_LIMIT) or UGC_SEARCH_LIMIT)
+FORCE_CHANNEL_IDS = list(_chatbot_secrets.get("force_channel_ids", []) or [])
+
+# TVING 공식 채널: https://www.youtube.com/@TVING_official
+TVING_OFFICIAL_CHANNEL_ID = "UCNIiH_4ArJNd_cDZApZ7AFg"
+if TVING_OFFICIAL_CHANNEL_ID not in FORCE_CHANNEL_IDS:
+    FORCE_CHANNEL_IDS.append(TVING_OFFICIAL_CHANNEL_ID)
+
 # Gemini 동시 호출 제한
 MAX_GEMINI_INFLIGHT = max(1, int(_chatbot_secrets.get("max_gemini_inflight", st.secrets.get("MAX_GEMINI_INFLIGHT", 3)) or 3))
 GEMINI_INFLIGHT_WAIT_SEC = int(_chatbot_secrets.get("gemini_inflight_wait_sec", st.secrets.get("GEMINI_INFLIGHT_WAIT_SEC", 120)) or 120)
@@ -2063,7 +2073,7 @@ def call_gemini_smart_cache(model_name, keys, system_instruction, user_query,
         return f"⚠️ [시스템] 처리 중 에러: {e}"
 
 def yt_search_videos(rt, keyword, max_results, order="viewCount",
-                     published_after=None, published_before=None):
+                     published_after=None, published_before=None, channel_id=None):
     video_ids, token = [], None
     while len(video_ids) < max_results:
         params = {
@@ -2072,6 +2082,7 @@ def yt_search_videos(rt, keyword, max_results, order="viewCount",
         }
         if published_after: params["publishedAfter"] = published_after
         if published_before: params["publishedBefore"] = published_before
+        if channel_id: params["channelId"] = channel_id
         if token: params["pageToken"] = token
 
         resp = rt.execute(lambda s: s.search().list(**params))
@@ -2398,7 +2409,27 @@ def run_pipeline_first_turn(user_query: str, extra_video_ids=None, only_these_vi
                 search_kw = f"{base_no_hash} | #{base_no_hash}"
                 
             if search_kw:
-                all_ids.extend(yt_search_videos(rt, search_kw, 100, "viewCount", kst_to_rfc3339_utc(start_dt), kst_to_rfc3339_utc(end_dt)))
+                # 일반 UGC 검색: 키워드별 최대 200개(기본값) 수집
+                all_ids.extend(yt_search_videos(
+                    rt,
+                    search_kw,
+                    UGC_SEARCH_LIMIT,
+                    "viewCount",
+                    kst_to_rfc3339_utc(start_dt),
+                    kst_to_rfc3339_utc(end_dt)
+                ))
+
+                # 강제 포함 채널: 일반 검색 결과에 잡히지 않아도 별도 채널 검색 결과를 합산
+                for channel_id in FORCE_CHANNEL_IDS:
+                    all_ids.extend(yt_search_videos(
+                        rt,
+                        search_kw,
+                        FORCE_CHANNEL_SEARCH_LIMIT,
+                        "viewCount",
+                        kst_to_rfc3339_utc(start_dt),
+                        kst_to_rfc3339_utc(end_dt),
+                        channel_id=channel_id
+                    ))
         
         if extra_video_ids:
             all_ids.extend(extra_video_ids)
