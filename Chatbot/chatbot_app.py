@@ -313,15 +313,16 @@ MAX_TOTAL_COMMENTS   = int(_chatbot_secrets.get("max_total_comments", 120_000) o
 MAX_COMMENTS_PER_VID = int(_chatbot_secrets.get("max_comments_per_vid", 4_000) or 4_000)
 CACHE_TTL_MINUTES    = int(_chatbot_secrets.get("cache_ttl_minutes", 20) or 20)
 
-# UGC 검색 수집 한도 및 강제 포함 채널
+# UGC 검색 수집 한도 및 TVING 공식 채널 업로드 playlist 강제 포함 옵션
 UGC_SEARCH_LIMIT = int(_chatbot_secrets.get("ugc_search_limit", 200) or 200)
-FORCE_CHANNEL_SEARCH_LIMIT = int(_chatbot_secrets.get("force_channel_search_limit", UGC_SEARCH_LIMIT) or UGC_SEARCH_LIMIT)
-FORCE_CHANNEL_IDS = list(_chatbot_secrets.get("force_channel_ids", []) or [])
+TVING_UPLOADS_SEARCH_LIMIT = int(_chatbot_secrets.get("tving_uploads_search_limit", UGC_SEARCH_LIMIT) or UGC_SEARCH_LIMIT)
+TVING_UPLOADS_REQUIRE_KEYWORD_MATCH = bool(_chatbot_secrets.get("tving_uploads_require_keyword_match", True))
 
 # TVING 공식 채널: https://www.youtube.com/@TVING_official
 TVING_OFFICIAL_CHANNEL_ID = "UCNIiH_4ArJNd_cDZApZ7AFg"
-if TVING_OFFICIAL_CHANNEL_ID not in FORCE_CHANNEL_IDS:
-    FORCE_CHANNEL_IDS.append(TVING_OFFICIAL_CHANNEL_ID)
+TVING_FORCE_UPLOADS_CHANNEL_IDS = list(_chatbot_secrets.get("tving_force_uploads_channel_ids", []) or [])
+if TVING_OFFICIAL_CHANNEL_ID not in TVING_FORCE_UPLOADS_CHANNEL_IDS:
+    TVING_FORCE_UPLOADS_CHANNEL_IDS.append(TVING_OFFICIAL_CHANNEL_ID)
 
 # Gemini 동시 호출 제한
 MAX_GEMINI_INFLIGHT = max(1, int(_chatbot_secrets.get("max_gemini_inflight", st.secrets.get("MAX_GEMINI_INFLIGHT", 3)) or 3))
@@ -365,6 +366,7 @@ def ensure_state():
         "loaded_session_name": None,
         "own_ip_mode": False,
         "own_ip_toggle_prev": None,
+        "tving_uploads_mode": False,
         "current_cache": None,
     }
     for k, v in defaults.items():
@@ -388,7 +390,7 @@ def _reset_chat_only(keep_auth: bool = True):
         "sample_text_full_context", "analysis_scope_line",
         "loaded_session_name", "current_cache",
         # ui / chatbot options
-        "own_ip_mode", "own_ip_toggle_prev", "strict_search_mode",
+        "own_ip_mode", "own_ip_toggle_prev", "strict_search_mode", "tving_uploads_mode",
         # transient workflow state
         "editing_session",
         # youtube / gemini app-local rotation/cache state
@@ -2093,6 +2095,131 @@ def yt_search_videos(rt, keyword, max_results, order="viewCount",
         time.sleep(0.25)
     return video_ids
 
+
+def _parse_youtube_utc_dt(value: str):
+    """YouTube RFC3339 문자열을 UTC aware datetime으로 변환."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _normalize_keyword_for_match(value: str) -> str:
+    return re.sub(r"\s+", "", str(value or "").lower().lstrip("#"))
+
+
+def _matches_any_keyword(title: str, description: str, keywords: list) -> bool:
+    kws = [_normalize_keyword_for_match(k) for k in (keywords or []) if _normalize_keyword_for_match(k)]
+    if not kws:
+        return True
+    hay = _normalize_keyword_for_match(f"{title} {description}")
+    return any(k in hay for k in kws)
+
+
+def yt_get_uploads_playlist_id(rt, channel_id: str) -> str:
+    """채널 ID로 해당 채널의 uploads playlist ID 조회."""
+    if not channel_id:
+        return ""
+    resp = rt.execute(lambda s: s.channels().list(
+        part="contentDetails",
+        id=channel_id,
+        maxResults=1
+    ))
+    items = resp.get("items", []) or []
+    if not items:
+        return ""
+    return (((items[0].get("contentDetails") or {}).get("relatedPlaylists") or {}).get("uploads") or "")
+
+
+def yt_playlist_video_ids_by_period(rt, playlist_id: str, max_results: int,
+                                    start_dt: datetime = None, end_dt: datetime = None,
+                                    keywords: list = None, require_keyword_match: bool = True):
+    """업로드 playlist에서 기간 내 영상 ID를 직접 가져온다.
+
+    search().list의 검색 노출/랭킹에 의존하지 않기 때문에 공식 채널 영상 누락을 줄일 수 있다.
+    playlistItems.list는 날짜 필터 파라미터가 없어서 직접 publishedAt을 비교한다.
+    """
+    if not playlist_id or max_results <= 0:
+        return []
+
+    start_utc = start_dt.astimezone(timezone.utc) if start_dt else None
+    end_utc = end_dt.astimezone(timezone.utc) if end_dt else None
+
+    video_ids, token = [], None
+    while len(video_ids) < max_results:
+        params = {
+            "part": "snippet,contentDetails",
+            "playlistId": playlist_id,
+            "maxResults": 50,
+        }
+        if token:
+            params["pageToken"] = token
+
+        resp = rt.execute(lambda s: s.playlistItems().list(**params))
+        items = resp.get("items", []) or []
+        if not items:
+            break
+
+        reached_older_than_start = False
+        for item in items:
+            snip = item.get("snippet", {}) or {}
+            cont = item.get("contentDetails", {}) or {}
+            video_id = cont.get("videoId") or ((snip.get("resourceId") or {}).get("videoId"))
+            published_raw = cont.get("videoPublishedAt") or snip.get("publishedAt")
+            published_dt = _parse_youtube_utc_dt(published_raw)
+
+            if start_utc and published_dt and published_dt < start_utc:
+                reached_older_than_start = True
+                continue
+            if end_utc and published_dt and published_dt > end_utc:
+                continue
+
+            title = snip.get("title", "")
+            desc = snip.get("description", "")
+            if require_keyword_match and not _matches_any_keyword(title, desc, keywords or []):
+                continue
+
+            if video_id and video_id not in video_ids:
+                video_ids.append(video_id)
+                if len(video_ids) >= max_results:
+                    break
+
+        token = resp.get("nextPageToken")
+        # uploads playlist는 보통 최신순이라 시작일보다 과거 구간에 도달하면 더 볼 필요가 적다.
+        if not token or reached_older_than_start:
+            break
+        time.sleep(0.25)
+
+    return video_ids
+
+
+def yt_force_uploads_video_ids(rt, channel_ids: list, max_results_per_channel: int,
+                               start_dt: datetime, end_dt: datetime,
+                               keywords: list = None, require_keyword_match: bool = True):
+    """공식/지정 채널의 업로드 playlist 기반 강제 포함 영상 ID 수집."""
+    out = []
+    for channel_id in list(dict.fromkeys(channel_ids or [])):
+        try:
+            playlist_id = yt_get_uploads_playlist_id(rt, channel_id)
+            if not playlist_id:
+                continue
+            out.extend(yt_playlist_video_ids_by_period(
+                rt,
+                playlist_id,
+                max_results_per_channel,
+                start_dt=start_dt,
+                end_dt=end_dt,
+                keywords=keywords,
+                require_keyword_match=require_keyword_match,
+            ))
+        except Exception as e:
+            print(f"⚠️ [YouTube uploads playlist] channel={channel_id} failed: {e}")
+            continue
+    return list(dict.fromkeys(out))
+
+
 def yt_video_statistics(rt, video_ids):
     rows = []
     for i in range(0, len(video_ids), 50):
@@ -2378,6 +2505,8 @@ def run_pipeline_first_turn(user_query: str, extra_video_ids=None, only_these_vi
     kw_main = schema.get("keywords", [])
 
     own_mode = bool(st.session_state.get("own_ip_mode", False))
+    role = str(st.session_state.get("auth_role") or "user").strip().lower()
+    tving_uploads_mode = bool(st.session_state.get("tving_uploads_mode", False)) and role in {"master", "admin"}
     pgc_ids = []
     
     # ===== 자사 IP 모드 - DB 직접 검색 (메모리 최적화) =====
@@ -2419,17 +2548,18 @@ def run_pipeline_first_turn(user_query: str, extra_video_ids=None, only_these_vi
                     kst_to_rfc3339_utc(end_dt)
                 ))
 
-                # 강제 포함 채널: 일반 검색 결과에 잡히지 않아도 별도 채널 검색 결과를 합산
-                for channel_id in FORCE_CHANNEL_IDS:
-                    all_ids.extend(yt_search_videos(
-                        rt,
-                        search_kw,
-                        FORCE_CHANNEL_SEARCH_LIMIT,
-                        "viewCount",
-                        kst_to_rfc3339_utc(start_dt),
-                        kst_to_rfc3339_utc(end_dt),
-                        channel_id=channel_id
-                    ))
+        # TVING 공식 채널 강제 포함 모드:
+        # search().list의 검색 노출에 의존하지 않고, 채널 uploads playlist에서 직접 후보 영상을 가져온다.
+        if tving_uploads_mode:
+            all_ids.extend(yt_force_uploads_video_ids(
+                rt,
+                TVING_FORCE_UPLOADS_CHANNEL_IDS,
+                TVING_UPLOADS_SEARCH_LIMIT,
+                start_dt,
+                end_dt,
+                keywords=kw_main,
+                require_keyword_match=TVING_UPLOADS_REQUIRE_KEYWORD_MATCH,
+            ))
         
         if extra_video_ids:
             all_ids.extend(extra_video_ids)
@@ -2698,10 +2828,13 @@ if not st.session_state.chat:
 """, unsafe_allow_html=True)
 
     # ===== 검색 및 데이터 모드 설정 토글 UI =====
-    _, col_toggle1, col_toggle2, _ = st.columns([1.7, 1.5, 1.5, 1.2])
+    _, col_toggle1, col_toggle2, col_toggle3, _ = st.columns([1.2, 1.5, 1.7, 1.5, 1.0])
 
     role = str(st.session_state.get("auth_role") or "user").strip().lower()
     own_ip_allowed = role in {"master", "admin", "team_member"}
+    tving_uploads_allowed = role in {"master", "admin"}
+    if not tving_uploads_allowed:
+        st.session_state["tving_uploads_mode"] = False
 
     with col_toggle1:
         st.write("")
@@ -2733,6 +2866,15 @@ if not st.session_state.chat:
             key="strict_search_mode",
             help="체크 시 해시태그(#)가 정확히 일치하는 영상만 수집합니다. 엉뚱한 노이즈가 섞일 때 켜주세요."
         )
+
+    if tving_uploads_allowed:
+        with col_toggle3:
+            st.write("")
+            st.toggle(
+                "📺 TVING 공식채널 포함",
+                key="tving_uploads_mode",
+                help="admin/master 전용: TVING 공식 채널의 uploads playlist에서 기간 내 영상을 직접 가져와 후보군에 추가합니다."
+            )
 
 else:
     render_metadata_and_downloads()
