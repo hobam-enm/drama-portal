@@ -1121,6 +1121,7 @@ def actor_summary_card(row: pd.Series):
                 <div class='summary-title'>배우 개요</div>
                 <div class='summary-big' style='font-size:1.9rem;'><a class='actor-link' href='{actor_detail_href(row['배우'])}' target='_self' style='color:inherit; text-decoration:none;'>{row['배우']}</a></div>
                 <div class='summary-sub'>
+                    전체 순위 <b>{format_int(row.get('#', np.nan))}위</b><br>
                     합산점수 <b>{format_score(row['합산점수'])}</b><br>
                     배우화제성 <b>{format_int(row['배우화제성'])}</b><br>
                     출연작품수 <b>{format_int(row['출연작품수'])}</b><br>
@@ -1148,10 +1149,22 @@ def build_actor_program_summary(raw_df: pd.DataFrame, actor_name: str) -> pd.Dat
     actor_raw = raw_df[raw_df["인물명"] == actor_name].copy()
     if actor_raw.empty:
         return pd.DataFrame(columns=["프로그램명", "드라마화제성", "배우화제성"])
+
+    # 대표출연작 카드에서 빈 제목/비정상 문자열이 카드로 생성되지 않도록 정리합니다.
+    actor_raw["프로그램명"] = actor_raw["프로그램명"].astype(str).str.strip()
+    actor_raw = actor_raw[
+        actor_raw["프로그램명"].notna()
+        & (actor_raw["프로그램명"] != "")
+        & (~actor_raw["프로그램명"].str.lower().isin(["nan", "none", "null"]))
+    ].copy()
+    if actor_raw.empty:
+        return pd.DataFrame(columns=["프로그램명", "드라마화제성", "배우화제성"])
+
     agg = (
         actor_raw.groupby("프로그램명", as_index=False)[["드라마화제성", "배우화제성"]]
         .sum()
         .sort_values(["배우화제성", "드라마화제성"], ascending=[False, False])
+        .reset_index(drop=True)
     )
     return agg
 
@@ -1864,11 +1877,14 @@ def render_detail(raw_df: pd.DataFrame, result_df: pd.DataFrame):
 
     st.markdown("<div class='detail-line-section'>", unsafe_allow_html=True)
     st.markdown("<div class='detail-section-title'>대표출연작 영역</div>", unsafe_allow_html=True)
-    actor_programs = build_actor_program_summary(raw_df, selected_actor).head(6)
-    cols = st.columns(3)
-    for idx, r in actor_programs.iterrows():
-        with cols[idx % 3]:
-            work_card(r["프로그램명"], r["드라마화제성"], r["배우화제성"])
+    actor_programs = build_actor_program_summary(raw_df, selected_actor).head(6).reset_index(drop=True)
+    if actor_programs.empty:
+        st.info("표시할 대표출연작이 없습니다.")
+    else:
+        cols = st.columns(3)
+        for idx, r in actor_programs.iterrows():
+            with cols[idx % 3]:
+                work_card(r["프로그램명"], r["드라마화제성"], r["배우화제성"])
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("<div class='detail-line-section'>", unsafe_allow_html=True)
