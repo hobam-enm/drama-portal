@@ -1041,6 +1041,90 @@ def apps_config() -> Dict[str, str]:
     return dict(sget("apps", default={}) or {})
 
 
+# =========================================================
+# service status / maintenance
+# =========================================================
+APP_STATUS_COLL = "app_status"
+APP_STATUS_OPEN = "open"
+APP_STATUS_MAINTENANCE = "maintenance"
+
+
+def app_status_coll():
+    db = get_db()
+    if db is None:
+        return None
+    return db[APP_STATUS_COLL]
+
+
+def get_app_status_map() -> Dict[str, Dict[str, Any]]:
+    if not mongo_available():
+        return {}
+    c = app_status_coll()
+    if c is None:
+        return {}
+    try:
+        docs = list(c.find({}))
+    except Exception:
+        return {}
+    result: Dict[str, Dict[str, Any]] = {}
+    for doc in docs:
+        app_key = str(doc.get("app_key") or "").strip()
+        if not app_key:
+            continue
+        result[app_key] = {
+            "status": str(doc.get("status") or APP_STATUS_OPEN),
+            "message": str(doc.get("message") or ""),
+            "updated_at": doc.get("updated_at"),
+            "updated_by": str(doc.get("updated_by") or ""),
+        }
+    return result
+
+
+def get_app_status(app_key: str, status_map: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
+    status_map = status_map if status_map is not None else get_app_status_map()
+    return status_map.get(str(app_key), {"status": APP_STATUS_OPEN, "message": ""})
+
+
+def is_app_maintenance(app_key: str, status_map: Optional[Dict[str, Dict[str, Any]]] = None) -> bool:
+    status = get_app_status(app_key, status_map=status_map)
+    return str(status.get("status") or APP_STATUS_OPEN) == APP_STATUS_MAINTENANCE
+
+
+def update_app_status(app_key: str, status: str, message: str, actor_user: Dict[str, Any]) -> Tuple[bool, str]:
+    if not mongo_available():
+        return False, "MongoDB가 설정되지 않아 서비스 상태 저장이 불가합니다."
+    if not is_master(actor_user):
+        return False, "마스터만 서비스 상태를 변경할 수 있습니다."
+
+    app_key = str(app_key or "").strip()
+    if not app_key:
+        return False, "서비스 키가 올바르지 않습니다."
+    if status not in {APP_STATUS_OPEN, APP_STATUS_MAINTENANCE}:
+        return False, "서비스 상태값이 올바르지 않습니다."
+
+    c = app_status_coll()
+    if c is None:
+        return False, "서비스 상태 컬렉션을 사용할 수 없습니다."
+
+    now = utcnow()
+    c.update_one(
+        {"app_key": app_key},
+        {"$set": {
+            "app_key": app_key,
+            "status": status,
+            "message": str(message or ""),
+            "updated_at": now,
+            "updated_by": str(actor_user.get("id") or ""),
+        }},
+        upsert=True,
+    )
+    return True, "서비스 상태가 저장되었습니다."
+
+
+def service_status_label(status: Optional[str]) -> str:
+    return "점검중" if str(status or APP_STATUS_OPEN) == APP_STATUS_MAINTENANCE else "정상 운영"
+
+
 # 모든 서비스 카드는 포털/가입요청/승인 화면에 노출합니다.
 # 실제 접속 가능 여부는 각 사용자의 allowed_apps 권한으로만 판단합니다.
 # 단, 마스터는 운영 편의를 위해 모든 앱에 접근 가능합니다.
@@ -1091,7 +1175,7 @@ def clean_allowed_apps(values: Optional[List[str]], options: List[str]) -> List[
 
 def get_admin_page() -> str:
     page = str(st.session_state.get("admin_page") or "")
-    return page if page in {"signup_requests", "password_resets", "member_management"} else ""
+    return page if page in {"signup_requests", "password_resets", "member_management", "service_status"} else ""
 
 
 def set_admin_page(page: str):
@@ -1104,6 +1188,7 @@ def build_cards_html(user: Dict[str, Any], keys: List[str]) -> str:
     allowed = set(user.get("allowed_apps") or [])
     img_map = app_images()
     url_map = apps_config()
+    status_map = get_app_status_map()
 
     for key in keys:
         url = str(url_map.get(key) or "").strip()
@@ -1114,7 +1199,11 @@ def build_cards_html(user: Dict[str, Any], keys: List[str]) -> str:
 
         # 실제 서비스 진입은 allowed_apps에 권한이 있는 사용자만 허용합니다.
         # 마스터는 예외적으로 전체 서비스 접근 가능.
-        can_access = is_master(user) or (key in allowed)
+        # 단, master가 특정 서비스를 점검중으로 전환하면 일반 사용자는 신규 링크 진입이 차단됩니다.
+        # 기존 접속 세션은 건드리지 않고 frontgate 카드 링크만 막습니다.
+        can_access_by_permission = is_master(user) or (key in allowed)
+        maintenance = is_app_maintenance(key, status_map=status_map)
+        can_access = can_access_by_permission and (not maintenance or is_master(user))
         public_apps = {"ip_briefing", "insightlab"}
         needs_auth_handoff = key not in public_apps
         final_url = (
@@ -1122,26 +1211,37 @@ def build_cards_html(user: Dict[str, Any], keys: List[str]) -> str:
             if can_access and SIGNING_SECRET and needs_auth_handoff
             else url
         )
-        state_badge = "접근 가능" if can_access else "권한 없음"
-        badge_class = "ok" if can_access else "blocked"
+
+        if maintenance and not is_master(user):
+            state_badge = "점검중"
+            badge_class = "maintenance"
+        elif can_access_by_permission:
+            state_badge = "접근 가능"
+            badge_class = "ok"
+        else:
+            state_badge = "권한 없음"
+            badge_class = "blocked"
+
         href = final_url if can_access else "#"
         target = "_blank" if can_access else "_self"
+        disabled_class = "disabled" if not can_access else ""
+        maintenance_msg = str(get_app_status(key, status_map=status_map).get("message") or "현재 점검 중입니다.")
+        desc = maintenance_msg if maintenance and not is_master(user) else meta["desc"]
         html_parts.append(
             f"""
-            <a class="card-link {'disabled' if not can_access else ''}" href="{href}" target="{target}" rel="noopener noreferrer">
+            <a class="card-link {disabled_class}" href="{href}" target="{target}" rel="noopener noreferrer">
               <div class="card">
                 <div class="thumb-wrap"><img class="thumb" src="{img}" alt="{meta['title']}"></div>
                 <div class="body">
                   <div class="state-badge {badge_class}">{state_badge}</div>
                   <div class="title">{meta['title']}</div>
-                  <p class="desc">{meta['desc']}</p>
+                  <p class="desc">{desc}</p>
                 </div>
               </div>
             </a>
             """
         )
     return "".join(html_parts)
-
 
 def render_card_rows(user: Dict[str, Any]):
     all_keys = visible_app_keys(user)
@@ -1180,6 +1280,7 @@ def render_card_rows(user: Dict[str, Any]):
           .state-badge {{ display:inline-block; font-size:.75rem; font-weight:700; border-radius:999px; padding:4px 10px; margin-bottom:8px; }}
           .state-badge.ok {{ background:#e9f8ef; color:#0f8a43; }}
           .state-badge.blocked {{ background:#fff1f2; color:#d92d20; }}
+          .state-badge.maintenance {{ background:#fff7ed; color:#c2410c; }}
         </style>
         </head>
         <body>
@@ -1338,8 +1439,59 @@ def assignable_role_options(actor_user: Dict[str, Any], target_user: Optional[Di
     return [current_role]
 
 
+def render_service_status_panel(admin_user: Dict[str, Any]):
+    if not is_master(admin_user):
+        st.error("마스터만 서비스 상태를 관리할 수 있습니다.")
+        return
+
+    st.markdown("### 🚧 서비스 상태 관리")
+    st.caption("점검중으로 전환하면 포털 카드 링크만 차단됩니다. 이미 접속 중인 사용자의 세션은 유지됩니다.")
+
+    app_keys = visible_app_keys(admin_user)
+    status_map = get_app_status_map()
+    labels = {k: app_meta(k)["title"] for k in app_keys}
+
+    if not app_keys:
+        st.info("등록된 서비스가 없습니다.")
+        return
+
+    for app_key in app_keys:
+        meta = app_meta(app_key)
+        current_doc = get_app_status(app_key, status_map=status_map)
+        current_status = str(current_doc.get("status") or APP_STATUS_OPEN)
+        if current_status not in {APP_STATUS_OPEN, APP_STATUS_MAINTENANCE}:
+            current_status = APP_STATUS_OPEN
+        current_message = str(current_doc.get("message") or "")
+        updated_at = format_dt_kst(current_doc.get("updated_at"))
+        updated_by = str(current_doc.get("updated_by") or "-")
+
+        with st.expander(f"{labels.get(app_key, app_key)} · {service_status_label(current_status)}", expanded=False):
+            st.caption(f"서비스 키: `{app_key}` · 최종 변경: {updated_at} · 변경자: {updated_by}")
+            selected_status = st.selectbox(
+                "상태",
+                [APP_STATUS_OPEN, APP_STATUS_MAINTENANCE],
+                index=[APP_STATUS_OPEN, APP_STATUS_MAINTENANCE].index(current_status),
+                format_func=service_status_label,
+                key=f"service_status_{app_key}",
+            )
+            message = st.text_input(
+                "점검 안내문구",
+                value=current_message or "현재 점검 중입니다.",
+                key=f"service_status_msg_{app_key}",
+            )
+            if st.button("상태 저장", key=f"save_service_status_{app_key}", use_container_width=True):
+                ok, msg = update_app_status(app_key, selected_status, message, admin_user)
+                (st.success if ok else st.error)(msg)
+                if ok:
+                    st.rerun()
+
+
 def render_admin_panel(admin_user: Dict[str, Any], page: str):
     st.markdown("### 🛠 관리자 페이지")
+
+    if page == "service_status":
+        render_service_status_panel(admin_user)
+        return
 
     # 권한 부여 가능 서비스:
     # - 마스터: 전체 서비스
@@ -1544,6 +1696,9 @@ def render_sidebar(user: Dict[str, Any]):
                 st.rerun()
             if st.button("멤버 관리", use_container_width=True):
                 set_admin_page("member_management")
+                st.rerun()
+            if is_master(user) and st.button("서비스 상태 관리", use_container_width=True):
+                set_admin_page("service_status")
                 st.rerun()
             if get_admin_page() and st.button("서비스 홈으로", use_container_width=True):
                 set_admin_page("")
