@@ -1854,13 +1854,21 @@ def render_reference():
 
 def table_styler(df: pd.DataFrame):
     show = df[VISIBLE_COLUMNS].copy()
-    show = show.rename(columns={"합산등급": "합산등급"})
+
+    # 하단 전체 배우 리스트에서는 백분율이라는 원천 컬럼명 대신
+    # 실무자가 바로 읽기 쉬운 0~100점 스케일의 점수로 표시합니다.
+    score_column_map = {
+        "폭발백분율": "폭발점수",
+        "안정백분율": "안정점수",
+        "기여백분율": "기여점수",
+    }
     show["합산점수"] = pd.to_numeric(show["합산점수"], errors="coerce").map(format_score)
     for c in ["폭발백분율", "안정백분율", "기여백분율"]:
-        show[c] = pd.to_numeric(show[c], errors="coerce").map(format_percent_0)
+        show[c] = (pd.to_numeric(show[c], errors="coerce") * 100).map(format_score)
     for c in ["배우화제성", "출연작품수"]:
         show[c] = pd.to_numeric(show[c], errors="coerce").map(format_int)
     show["#"] = show["#"].astype(int)
+    show = show.rename(columns=score_column_map)
 
     def bg_color(val):
         grade = str(val)
@@ -1906,7 +1914,7 @@ def render_overview(raw_df: pd.DataFrame, result_df: pd.DataFrame):
     st.plotly_chart(heatmap_fig, use_container_width=True)
 
     st.markdown("<div class='overview-line-section'>", unsafe_allow_html=True)
-    st.markdown("<div class='overview-parent-title'>성별별 Top 10</div>", unsafe_allow_html=True)
+    st.markdown("<div class='overview-parent-title'>성별 Top 10</div>", unsafe_allow_html=True)
     gender_left, gender_right = st.columns(2)
     with gender_left:
         st.markdown("<div class='overview-child-title'>남배우 Top 10</div>", unsafe_allow_html=True)
@@ -1944,14 +1952,20 @@ def render_overview(raw_df: pd.DataFrame, result_df: pd.DataFrame):
 
 
 def similar_score_actors(result_df: pd.DataFrame, row: pd.Series, top_n: int = 4) -> pd.DataFrame:
-    """합산점수 기준으로 선택 배우 바로 위/아래의 인접 배우를 반환합니다.
+    """동일 성별·동일 연령대 안에서 합산점수 기준 인접 배우를 반환합니다.
 
     기본은 위 2명 + 아래 2명이며, 한쪽이 부족하면 반대쪽에서 채웁니다.
+    동일 성별·동일 연령대 후보가 부족하면 가능한 후보만 표시합니다.
     """
     if result_df.empty or "배우" not in result_df.columns:
         return pd.DataFrame()
 
-    sorted_df = result_df.sort_values(["합산점수", "배우화제성"], ascending=[False, False]).reset_index(drop=True).copy()
+    same_group_df = result_df.copy()
+    for col in ["성별", "연령대"]:
+        if col in same_group_df.columns and col in row.index:
+            same_group_df = same_group_df[same_group_df[col].astype(str) == str(row.get(col, ""))].copy()
+
+    sorted_df = same_group_df.sort_values(["합산점수", "배우화제성"], ascending=[False, False]).reset_index(drop=True).copy()
     matches = sorted_df.index[sorted_df["배우"] == row["배우"]].tolist()
     if not matches:
         return pd.DataFrame()
@@ -2087,14 +2101,14 @@ def render_detail(raw_df: pd.DataFrame, result_df: pd.DataFrame):
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("<div class='detail-line-section'>", unsafe_allow_html=True)
-    st.markdown("<div class='detail-section-title'>점수 인접 배우 영역</div>", unsafe_allow_html=True)
+    st.markdown("<div class='detail-section-title'>유사점수배우</div>", unsafe_allow_html=True)
     st.markdown(
-        "<div class='overview-section-sub'>합산점수 기준으로 선택 배우 바로 위 2명·아래 2명을 보여줍니다. 색상은 선택 배우 대비 각 축의 상대적 강약입니다.</div>",
+        "<div class='overview-section-sub'>동일 성별·동일 연령대 안에서 합산점수 기준으로 선택 배우 바로 위 2명·아래 2명을 보여줍니다. 색상은 선택 배우 대비 각 축의 상대적 강약입니다.</div>",
         unsafe_allow_html=True,
     )
     sim = similar_score_actors(result_df, row, 4)
     if sim.empty:
-        st.info("표시할 인접 배우가 없습니다.")
+        st.info("동일 성별·동일 연령대 안에서 표시할 유사점수배우가 없습니다.")
     else:
         cols = st.columns(4)
         for i, (_, r) in enumerate(sim.iterrows()):
