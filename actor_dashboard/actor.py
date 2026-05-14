@@ -3125,7 +3125,7 @@ def main():
 
     with st.sidebar:
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
-        page_options = ["OVERVIEW", "배우 상세보기", "(AI)배우 비교·탐색·찾기·조합", "라이징스타 감지기", "참고사항"]
+        page_options = ["OVERVIEW", "배우 상세보기", "(AI)배우 비교·탐색·찾기·조합", "참고사항"]
         query_page = str(st.query_params.get("page", "OVERVIEW"))
         if query_page in ["배우 모아보기", "배우 조합 분석(AI)"]:
             query_page = "(AI)배우 비교·탐색·찾기·조합"
