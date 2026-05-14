@@ -2103,7 +2103,7 @@ def render_detail(raw_df: pd.DataFrame, result_df: pd.DataFrame):
     st.markdown("<div class='detail-line-section'>", unsafe_allow_html=True)
     st.markdown("<div class='detail-section-title'>유사점수배우</div>", unsafe_allow_html=True)
     st.markdown(
-        "<div class='overview-section-sub'>동일 성별·동일 연령대 안에서 합산점수 기준으로 선택 배우 바로 위 2명·아래 2명을 보여줍니다. 색상은 선택 배우 대비 각 축의 상대적 강약입니다.</div>",
+        "<div class='overview-section-sub'>동일 성별·동일 연령대 안에서 유사점수 배우를 보여줍니다.</div>",
         unsafe_allow_html=True,
     )
     sim = similar_score_actors(result_df, row, 4)
