@@ -310,8 +310,8 @@ div[data-testid="column"]:has(.rank-help-wrap:hover) {
     z-index: 10010 !important;
 }
 
-.kpi-title { font-size: 20px; font-weight: 600; color: #444; margin-bottom: 10px; }
-.kpi-value { font-size: 25px; font-weight: 700; color: #000; line-height: 1.2; }
+.kpi-title { font-size: 18px; font-weight: 600; color: #444; margin-bottom: 8px; line-height: 1.25; word-break: keep-all; }
+.kpi-value { font-size: 24px; font-weight: 700; color: #000; line-height: 1.2; }
 .kpi-subwrap { margin-top: 10px; line-height: 1.4; }
 .kpi-sublabel { font-size: 13px; font-weight: 500; color: #555; letter-spacing: 0.1px; margin-right: 6px; }
 .kpi-substrong { font-size: 16px; font-weight: 700; color: #111; }
@@ -731,6 +731,11 @@ with st.sidebar:
     # ===== [추가] 전역 IP 셀렉트박스 스타일 (연한 배경 & 완벽한 가운데 정렬) =====
     st.markdown("""
     <style>
+    /* 기준IP 컷오프 토글 라벨 줄바꿈 방지 */
+    div[data-testid="stToggle"] label p {
+        white-space: nowrap !important;
+    }
+
     /* 셀렉트박스 배경 및 테두리 */
     section[data-testid="stSidebar"] div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
         background-color: #f1f5f9 !important; /* 연한 파스텔톤/회색 배경 */
@@ -1682,7 +1687,7 @@ def render_ip_detail():
         return
 
     can_use_reference_cutoff = _is_master_or_admin_user(current_user)
-    filter_cols = st.columns([5, 1.6, 2, 2]) if can_use_reference_cutoff else st.columns([5, 2, 2])
+    filter_cols = st.columns([4.4, 2.4, 2, 2]) if can_use_reference_cutoff else st.columns([5, 2, 2])
 
     with filter_cols[0]:
         st.markdown(f"<div class='page-title'>📈 {ip_selected} 성과 상세</div>", unsafe_allow_html=True)
@@ -1690,7 +1695,7 @@ def render_ip_detail():
     if can_use_reference_cutoff:
         with filter_cols[1]:
             limit_to_reference_ip = st.toggle(
-                "기준IP까지만 보기",
+                "기준IP로 컷오프",
                 value=False,
                 key=f"ip_detail_limit_to_reference__{ip_selected}",
                 help="선택 IP보다 뒤에 방영한 IP를 비교군에서 제외하고 순위/평균비를 계산합니다."
@@ -1808,7 +1813,7 @@ def render_ip_detail():
             base_raw = base_raw[(base_raw["IP"] == ip_selected) | base_ip_start.isna() | (base_ip_start <= target_start_dt)].copy()
             group_name_parts.append("기준IP까지")
         else:
-            st.warning("선택 IP의 방영시작일을 확인할 수 없어 '기준IP까지만 보기' 필터는 적용하지 않았습니다.", icon="⚠️")
+            st.warning("선택 IP의 방영시작일을 확인할 수 없어 '기준IP로 컷오프' 필터는 적용하지 않았습니다.", icon="⚠️")
 
     if comp_prog_filter is not None:
         if use_same_prog and not sel_prog:
