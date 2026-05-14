@@ -1857,17 +1857,21 @@ def table_styler(df: pd.DataFrame):
 
     # 하단 전체 배우 리스트에서는 백분율이라는 원천 컬럼명 대신
     # 실무자가 바로 읽기 쉬운 0~100점 스케일의 점수로 표시합니다.
+    # 단, 정렬이 텍스트 기준으로 먹지 않도록 숫자 컬럼은 문자열 포맷으로 바꾸지 않고
+    # float/int dtype을 유지한 뒤 Styler.format에서만 표시 형식을 적용합니다.
     score_column_map = {
         "폭발백분율": "폭발점수",
         "안정백분율": "안정점수",
         "기여백분율": "기여점수",
     }
-    show["합산점수"] = pd.to_numeric(show["합산점수"], errors="coerce").map(format_score)
+
+    show["#"] = pd.to_numeric(show["#"], errors="coerce").astype("Int64")
+    show["합산점수"] = pd.to_numeric(show["합산점수"], errors="coerce")
     for c in ["폭발백분율", "안정백분율", "기여백분율"]:
-        show[c] = (pd.to_numeric(show[c], errors="coerce") * 100).map(format_score)
+        show[c] = pd.to_numeric(show[c], errors="coerce") * 100
     for c in ["배우화제성", "출연작품수"]:
-        show[c] = pd.to_numeric(show[c], errors="coerce").map(format_int)
-    show["#"] = show["#"].astype(int)
+        show[c] = pd.to_numeric(show[c], errors="coerce")
+
     show = show.rename(columns=score_column_map)
 
     def bg_color(val):
@@ -1878,6 +1882,14 @@ def table_styler(df: pd.DataFrame):
 
     styler = (
         show.style
+        .format({
+            "합산점수": "{:.2f}",
+            "폭발점수": "{:.2f}",
+            "안정점수": "{:.2f}",
+            "기여점수": "{:.2f}",
+            "배우화제성": "{:,.0f}",
+            "출연작품수": "{:,.0f}",
+        }, na_rep="")
         .map(bg_color, subset=["합산등급", "폭발력등급", "안정성등급", "기여도등급"])
         .set_properties(subset=["합산등급"], **{"font-weight": "900"})
         .set_table_styles([
