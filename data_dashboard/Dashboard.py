@@ -2281,7 +2281,7 @@ def render_ip_detail():
 
     c6, c7, c8, c9, c10 = st.columns(5)
     kpi_with_rank(c6, "👀 총 조회수", val_view_total, base_view_total, rk_view_total, prog_label, intlike=True, cutoff_label=cut_view_total, detail_rows=detail_view_total)
-    kpi_with_rank(c7, "🌐 해외UGC", val_overseas_ugc, base_overseas_ugc, rk_overseas_ugc, prog_label, intlike=True, cutoff_label=cut_overseas_ugc, detail_rows=detail_overseas_ugc)
+    kpi_with_rank(c7, "🌐 해외UGC 조회수", val_overseas_ugc, base_overseas_ugc, rk_overseas_ugc, prog_label, intlike=True, cutoff_label=cut_overseas_ugc, detail_rows=detail_overseas_ugc)
     kpi_with_rank(c8, "💬 디지털 언급량", val_buzz, base_buzz, rk_buzz, prog_label, intlike=True, cutoff_label=cut_buzz, detail_rows=detail_buzz)
 
     topic_rank_suffix = "" if (val_topic_min is None or pd.isna(val_topic_min)) else f" <span style='font-size:15px;font-weight:700;color:#6b7280;'>({int(round(val_topic_min)):,d}위/최고)</span>"
