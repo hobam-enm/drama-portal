@@ -310,7 +310,7 @@ div[data-testid="column"]:has(.rank-help-wrap:hover) {
     z-index: 10010 !important;
 }
 
-.kpi-title { font-size: 18px; font-weight: 600; color: #444; margin-bottom: 8px; line-height: 1.25; word-break: keep-all; }
+.kpi-title { font-size: 16px; font-weight: 600; color: #444; margin-bottom: 8px; line-height: 1.25; word-break: keep-all; }
 .kpi-value { font-size: 24px; font-weight: 700; color: #000; line-height: 1.2; }
 .kpi-subwrap { margin-top: 10px; line-height: 1.4; }
 .kpi-sublabel { font-size: 13px; font-weight: 500; color: #555; letter-spacing: 0.1px; margin-right: 6px; }
