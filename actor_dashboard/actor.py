@@ -2017,8 +2017,7 @@ def axis_strength_html(candidate: pd.Series, base_row: pd.Series, axis_label: st
 
 def similar_actor_card_html(candidate: pd.Series, base_row: pd.Series) -> str:
     gap = float(candidate.get("score_gap", 0) or 0)
-    pos = "위" if gap > 0 else "아래"
-    gap_txt = f"{pos} {abs(gap):.2f}점"
+    gap_txt = f"{gap:+.2f}점"
     axes_html = "".join([
         axis_strength_html(candidate, base_row, "폭발", "폭발백분율", "폭발력등급"),
         axis_strength_html(candidate, base_row, "안정", "안정백분율", "안정성등급"),
