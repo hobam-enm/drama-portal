@@ -310,9 +310,15 @@ div[data-testid="column"]:has(.rank-help-wrap:hover) {
     z-index: 10010 !important;
 }
 
-.kpi-title { font-size: 14px; font-weight: 600; color: #6b7280; margin-bottom: 8px; }
-.kpi-value { font-size: 26px; font-weight: 800; color: #111827; line-height: 1.2; }
-.kpi-subwrap { margin-top: 8px; font-size: 12px; color: #9ca3af; }
+.kpi-title { font-size: 20px; font-weight: 600; color: #444; margin-bottom: 10px; }
+.kpi-value { font-size: 25px; font-weight: 700; color: #000; line-height: 1.2; }
+.kpi-subwrap { margin-top: 10px; line-height: 1.4; }
+.kpi-sublabel { font-size: 13px; font-weight: 500; color: #555; letter-spacing: 0.1px; margin-right: 6px; }
+.kpi-substrong { font-size: 16px; font-weight: 700; color: #111; }
+.kpi-subpct { font-size: 16px; font-weight: 700; }
+.kpi-rank-badge, .kpi-pct-badge { display:inline-flex; align-items:center; justify-content:center; min-width:46px; padding:2px 8px; border-radius:999px; background:#f8fafc; border:1px solid #dbe4f0; font-weight:800; }
+.kpi-rank-badge { color:#111827; }
+.kpi-pct-badge { background:#ffffff; }
 
 .ag-theme-streamlit .ag-header { 
     background-color: #f9fafb; font-weight: 700; color: #374151; 
@@ -324,6 +330,7 @@ div[data-testid="column"]:has(.rank-help-wrap:hover) {
 .rank-help-bubble { display:none; position:absolute; top:20px; left:0; min-width:260px; max-width:340px; background:#ffffff; border:1px solid #e5e7eb; box-shadow:0 10px 24px rgba(0,0,0,0.12); border-radius:10px; padding:10px; z-index:10040; text-align:left; }
 .rank-help-wrap:hover .rank-help-bubble { display:block; }
 .rank-tip-title { font-size:12px; font-weight:700; color:#374151; margin-bottom:6px; }
+.rank-tip-note { font-size:11px; font-weight:600; color:#2563eb; background:#eff6ff; border:1px solid #bfdbfe; border-radius:7px; padding:5px 7px; margin-bottom:6px; }
 .rank-tip-row { display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:6px; }
 .rank-tip-rank { width:36px; flex:0 0 36px; font-size:12px; font-weight:700; color:#111827; }
 .rank-tip-name { flex:1 1 auto; min-width:0; font-size:12px; color:#374151; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -1747,6 +1754,8 @@ def render_ip_detail():
         base_raw["회차_num"] = pd.to_numeric(base_raw["회차_numeric"], errors="coerce")
     else:
         base_raw["회차_num"] = pd.to_numeric(base_raw["회차"].str.extract(r"(\d+)", expand=False), errors="coerce")
+    if "주차" in base_raw.columns:
+        base_raw["주차_num"] = base_raw["주차"].apply(_week_to_num)
     
     if pd.notna(my_max_ep):
         base = base_raw[base_raw["회차_num"] <= my_max_ep].copy()
@@ -1901,6 +1910,69 @@ def render_ip_detail():
         s = s_ko.add(s_en, fill_value=0)
         return pd.to_numeric(s, errors="coerce").dropna()
 
+    def _week_key_col(df: pd.DataFrame) -> str | None:
+        """주간 평균 비교용 주차 기준 컬럼을 반환합니다."""
+        for col in ["주차_num", "주차시작일", "주차"]:
+            if col in df.columns and df[col].notna().any():
+                return col
+        return None
+
+    def _series_ip_metric_weekly_avg(base_df: pd.DataFrame, metric_name: str, media: List[str] | None = None) -> pd.Series:
+        """IP별 주간 평균값: 주차별 value 합산 후 IP별 평균."""
+        if _is_view_metric(metric_name):
+            sub = _get_view_data_for_metric(base_df, metric_name)
+        else:
+            sub = _metric_filter(base_df, metric_name).copy()
+
+        if media is not None and "매체" in sub.columns:
+            sub = sub[sub["매체"].isin(media)]
+        if sub.empty:
+            return pd.Series(dtype=float)
+
+        week_col = _week_key_col(sub)
+        if week_col is None:
+            return pd.Series(dtype=float)
+
+        sub = sub.copy()
+        sub["value"] = pd.to_numeric(sub["value"], errors="coerce").replace(0, np.nan)
+        sub = sub.dropna(subset=["IP", week_col, "value"])
+        if sub.empty:
+            return pd.Series(dtype=float)
+
+        week_sum = sub.groupby(["IP", week_col], as_index=False)["value"].sum()
+        s = week_sum.groupby("IP")["value"].mean()
+        return pd.to_numeric(s, errors="coerce").dropna()
+
+    def _ip_value_from_series(s: pd.Series, ip_name: str) -> float | None:
+        if s is None or s.empty or ip_name not in s.index:
+            return None
+        v = pd.to_numeric(pd.Series([s.loc[ip_name]]), errors="coerce").iloc[0]
+        return None if pd.isna(v) else float(v)
+
+    def _series_total_views_weekly_avg(base_ko_df: pd.DataFrame, base_en_df: pd.DataFrame) -> pd.Series:
+        """한글+영문 조회수의 IP별 주간 평균값."""
+        def _ip_week_sum(df_src: pd.DataFrame, metric_name: str) -> pd.Series:
+            sub = _get_view_data_for_metric(df_src, metric_name)
+            if sub.empty:
+                return pd.Series(dtype=float)
+            week_col = _week_key_col(sub)
+            if week_col is None:
+                return pd.Series(dtype=float)
+            sub = sub.copy()
+            sub["value"] = pd.to_numeric(sub["value"], errors="coerce").replace(0, np.nan)
+            sub = sub.dropna(subset=["IP", week_col, "value"])
+            if sub.empty:
+                return pd.Series(dtype=float)
+            return sub.groupby(["IP", week_col])["value"].sum()
+
+        s_ko = _ip_week_sum(base_ko_df, VIEW_METRIC_KO)
+        s_en = _ip_week_sum(base_en_df, VIEW_METRIC_EN)
+        s_week = s_ko.add(s_en, fill_value=0)
+        if s_week.empty:
+            return pd.Series(dtype=float)
+        s = s_week.groupby(level=0).mean()
+        return pd.to_numeric(s, errors="coerce").dropna()
+
     def _mean_from_series(s: pd.Series) -> float | None:
         s = pd.to_numeric(s, errors="coerce").dropna()
         return float(s.mean()) if not s.empty else None
@@ -1930,12 +2002,14 @@ def render_ip_detail():
         end = min(len(rows), my_idx + window + 1)
         return rows[start:end]
 
-    def _comparison_tooltip_html(detail_rows, prog_label: str, cutoff_label: str | None = None, intlike=False, digits=3):
+    def _comparison_tooltip_html(detail_rows, prog_label: str, cutoff_label: str | None = None, intlike=False, digits=3, basis_note: str | None = None):
         if not detail_rows:
             return ""
 
         cutoff_txt = f" / 기준: {cutoff_label}" if cutoff_label else ""
         lines = [f"<div class='rank-tip-title'>비교군: {prog_label}{cutoff_txt}</div>"]
+        if basis_note:
+            lines.append(f"<div class='rank-tip-note'>{basis_note}</div>")
 
         for r in detail_rows:
             name_style = "font-weight:700; color:#111827;" if r["is_me"] else "color:#374151;"
@@ -1956,38 +2030,40 @@ def render_ip_detail():
 
         return "".join(lines)
 
-    def sublines_html(prog_label: str, rank_tuple: tuple, val, base_val, cutoff_label: str | None = None, detail_rows=None, intlike=False, digits=3):
+    def sublines_html(prog_label: str, rank_tuple: tuple, val, base_val, cutoff_label: str | None = None, detail_rows=None, intlike=False, digits=3, compare_val=None, basis_note: str | None = None):
         rnk, total = rank_tuple if rank_tuple else (None, 0)
 
         if rnk is not None and total > 0:
             prefix = "👑 " if rnk == 1 else ""
             cutoff_txt = f"/{cutoff_label}" if cutoff_label else ""
             rank_label = (
-                f"{prefix}{rnk}위"
-                f"<span style='font-size:13px;font-weight:400;color:#9ca3af;margin-left:2px'>(총{total}개{cutoff_txt})</span>"
+                f"<span class='kpi-rank-badge'>{prefix}{rnk}위</span>"
+                f"<span style='font-size:13px;font-weight:400;color:#9ca3af;margin-left:4px'>(총{total}개{cutoff_txt})</span>"
             )
         else:
-            rank_label = "–위"
+            rank_label = "<span class='kpi-rank-badge'>–위</span>"
 
-        tip_html = _comparison_tooltip_html(detail_rows or [], prog_label, cutoff_label=cutoff_label, intlike=intlike, digits=digits)
+        ratio_val = val if compare_val is None else compare_val
+        pct_txt = "–"; col = "#888"
+        try:
+            if (ratio_val is not None) and (base_val not in (None, 0)) and (not (pd.isna(ratio_val) or pd.isna(base_val))):
+                pct = (float(ratio_val) / float(base_val)) * 100.0
+                pct_txt = f"{pct:.0f}%"; col = _pct_color(ratio_val, base_val)
+        except Exception:
+            pass
+
+        tip_html = _comparison_tooltip_html(detail_rows or [], prog_label, cutoff_label=cutoff_label, intlike=intlike, digits=digits, basis_note=basis_note)
         help_html = (
             f"<span class='rank-help-wrap'><span class='rank-help-icon'>i</span><span class='rank-help-bubble'>{tip_html}</span></span>"
             if tip_html else ""
         )
 
-        pct_txt = "–"; col = "#888"
-        try:
-            if (val is not None) and (base_val not in (None, 0)) and (not (pd.isna(val) or pd.isna(base_val))):
-                pct = (float(val) / float(base_val)) * 100.0
-                pct_txt = f"{pct:.0f}%"; col = _pct_color(val, base_val)
-        except Exception:
-            pass
         return (
             "<div class='kpi-subwrap'>"
             "<span class='kpi-sublabel'>그룹 內</span> "
             f"<span class='kpi-substrong'>{rank_label}</span>{help_html}<br/>"
             "<span class='kpi-sublabel'>그룹 평균比</span> "
-            f"<span class='kpi-subpct' style='color:{col};'>{pct_txt}</span>"
+            f"<span class='kpi-pct-badge' style='color:{col}; border-color:{col};'>{pct_txt}</span>"
             "</div>"
         )
 
@@ -1999,13 +2075,13 @@ def render_ip_detail():
           "</div>"
         )
 
-    def kpi_with_rank(col, title, value, base_val, rank_tuple, prog_label, intlike=False, digits=3, value_suffix="", cutoff_label: str | None = None, detail_rows=None):
+    def kpi_with_rank(col, title, value, base_val, rank_tuple, prog_label, intlike=False, digits=3, value_suffix="", cutoff_label: str | None = None, detail_rows=None, compare_val=None, basis_note: str | None = None):
         with col:
             main_val = fmt(value, digits=digits, intlike=intlike)
             st.markdown(
                 f"<div class='kpi-card'><div class='kpi-title'>{title}</div>"
                 f"<div class='kpi-value'>{main_val}{value_suffix}</div>"
-                f"{sublines_html(prog_label, rank_tuple, value, base_val, cutoff_label=cutoff_label, detail_rows=detail_rows, intlike=intlike, digits=digits)}</div>",
+                f"{sublines_html(prog_label, rank_tuple, value, base_val, cutoff_label=cutoff_label, detail_rows=detail_rows, intlike=intlike, digits=digits, compare_val=compare_val, basis_note=basis_note)}</div>",
                 unsafe_allow_html=True
             )
 
@@ -2035,12 +2111,15 @@ def render_ip_detail():
     
     base_netflix_series = _series_ip_metric(_base_slice_for_metric(base_raw, f, "N_W순위", "week"), "N_W순위", mode="min")
     base_netflix_best = float(base_netflix_series.mean()) if not base_netflix_series.empty else None
+    # 누적 KPI 비교 기준: 총량 기준(기존 방식)
     base_buzz = mean_of_ip_sums(_base_slice_for_metric(base_raw, f, "언급량", "week"), "언급량")
     base_view_ko_df = _base_slice_for_metric(base_raw, f, VIEW_METRIC_KO, "week")
     base_view_en_df = _base_slice_for_metric(base_raw, f, VIEW_METRIC_EN, "week")
     base_view = mean_of_ip_sums(base_view_ko_df, VIEW_METRIC_KO)
     base_view_en = mean_of_ip_sums(base_view_en_df, VIEW_METRIC_EN)
     series_view_total = _series_total_views(base_view_ko_df, base_view_en_df)
+    series_overseas_ugc = _series_ip_metric(base_view_en_df, VIEW_METRIC_EN, mode="sum")
+    series_buzz = _series_ip_metric(_base_slice_for_metric(base_raw, f, "언급량", "week"), "언급량", mode="sum")
     base_view_total = _mean_from_series(series_view_total)
     base_overseas_ugc = base_view_en
     base_topic_min_series = _series_ip_metric(_base_slice_for_metric(base_raw, f, "F_Total", "week"), "F_Total", mode="min")
@@ -2065,9 +2144,9 @@ def render_ip_detail():
     rk_wavve = _rank_within_program(_base_slice_for_metric(base_raw, f, "시청자수", "episode"), "시청자수", ip_selected, val_wavve, mode="ep_sum_mean", media=["웨이브"])
 
     rk_netflix = _rank_within_program(_base_slice_for_metric(base_raw, f, "N_W순위", "week"), "N_W순위", ip_selected, val_netflix_best, mode="min", media=None, low_is_good=True)
-    rk_buzz  = _rank_within_program(_base_slice_for_metric(base_raw, f, "언급량", "week"), "언급량",   ip_selected, val_buzz,  mode="sum",        media=None)
+    rk_buzz  = _rank_from_series(series_buzz, ip_selected, val_buzz)
     rk_view_total = _rank_from_series(series_view_total, ip_selected, val_view_total)
-    rk_overseas_ugc = _rank_within_program(base_view_en_df, VIEW_METRIC_EN, ip_selected, val_overseas_ugc, mode="sum", media=None)
+    rk_overseas_ugc = _rank_from_series(series_overseas_ugc, ip_selected, val_overseas_ugc)
     rk_fmin  = _rank_within_program(_base_slice_for_metric(base_raw, f, "F_Total", "week"), "F_Total",  ip_selected, val_topic_min, mode="min",   media=None, low_is_good=True)
     rk_fscr  = _rank_within_program(_base_slice_for_metric(base_raw, f, "F_score", "week"), "F_score",  ip_selected, val_topic_avg, mode="mean",  media=None, low_is_good=False)
 
@@ -2077,8 +2156,8 @@ def render_ip_detail():
     detail_quick = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "시청인구", "episode", media=["TVING QUICK"]), "시청인구", ip_selected, mode="ep_sum_mean", media=["TVING QUICK"])
     detail_vod   = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "시청인구", "episode", media=["TVING VOD"]), "시청인구", ip_selected, mode="ep_sum_mean", media=["TVING VOD", "TVING QUICK"])
     detail_view_total = _comparison_detail_rows_from_series(series_view_total, ip_selected)
-    detail_overseas_ugc = _comparison_detail_rows(base_view_en_df, VIEW_METRIC_EN, ip_selected, mode="sum")
-    detail_buzz  = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "언급량", "week"), "언급량", ip_selected, mode="sum")
+    detail_overseas_ugc = _comparison_detail_rows_from_series(series_overseas_ugc, ip_selected)
+    detail_buzz  = _comparison_detail_rows_from_series(series_buzz, ip_selected)
     detail_fscr  = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "F_score", "week"), "F_score", ip_selected, mode="mean")
     detail_wavve = _comparison_detail_rows(_base_slice_for_metric(base_raw, f, "시청자수", "episode"), "시청자수", ip_selected, mode="ep_sum_mean", media=["웨이브"])
 
