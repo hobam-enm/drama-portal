@@ -1608,6 +1608,70 @@ def _cutoff_label_for_metric(f: pd.DataFrame, metric_name: str, cutoff_kind: str
 # ====================================================================
 
 
+
+def _is_master_or_admin_user(user) -> bool:
+    """현재 사용자 정보에서 master/admin 권한 여부를 최대한 안전하게 판별합니다."""
+    if user is None:
+        return False
+
+    values = []
+
+    def _collect(v):
+        if v is None:
+            return
+        if isinstance(v, (list, tuple, set)):
+            for item in v:
+                _collect(item)
+        elif isinstance(v, dict):
+            for key in ["role", "roles", "권한", "grade", "level", "permission", "permissions", "is_admin", "is_master"]:
+                if key in v:
+                    _collect(v.get(key))
+        else:
+            values.append(str(v).strip().lower())
+
+    _collect(user)
+    return any(v in {"master", "admin", "administrator", "관리자"} or v == "true" for v in values)
+
+
+def _parse_date_any_local(x):
+    """방영시작 컬럼의 다양한 문자열 포맷을 날짜로 변환합니다."""
+    try:
+        if pd.isna(x):
+            return pd.NaT
+        s = str(x).strip()
+        if not s:
+            return pd.NaT
+        s = s.replace(".", "-").replace("/", "-")
+        return pd.to_datetime(s, errors="coerce")
+    except Exception:
+        return pd.NaT
+
+
+def _ip_start_date_map(df_src: pd.DataFrame) -> pd.Series:
+    """IP별 방영시작일 맵을 생성합니다. 방영시작 우선, 없으면 방영시작일을 사용합니다."""
+    if df_src is None or df_src.empty or "IP" not in df_src.columns:
+        return pd.Series(dtype="datetime64[ns]")
+
+    date_col = None
+    for c in ["방영시작", "방영시작일"]:
+        if c in df_src.columns:
+            date_col = c
+            break
+
+    if date_col is None:
+        return pd.Series(dtype="datetime64[ns]")
+
+    tmp = df_src[["IP", date_col]].dropna(subset=[date_col]).copy()
+    if tmp.empty:
+        return pd.Series(dtype="datetime64[ns]")
+
+    tmp["_start_dt"] = tmp[date_col].apply(_parse_date_any_local)
+    tmp = tmp.dropna(subset=["_start_dt"])
+    if tmp.empty:
+        return pd.Series(dtype="datetime64[ns]")
+
+    return tmp.groupby("IP")["_start_dt"].min()
+
 def render_ip_detail():
     
     df_full = load_data() # [3. 공통 함수]
@@ -1617,10 +1681,26 @@ def render_ip_detail():
         st.error("선택된 IP 정보가 없습니다.")
         return
 
-    filter_cols = st.columns([5, 2, 2])
+    can_use_reference_cutoff = _is_master_or_admin_user(current_user)
+    filter_cols = st.columns([5, 1.6, 2, 2]) if can_use_reference_cutoff else st.columns([5, 2, 2])
 
     with filter_cols[0]:
         st.markdown(f"<div class='page-title'>📈 {ip_selected} 성과 상세</div>", unsafe_allow_html=True)
+
+    if can_use_reference_cutoff:
+        with filter_cols[1]:
+            limit_to_reference_ip = st.toggle(
+                "기준IP까지만 보기",
+                value=False,
+                key=f"ip_detail_limit_to_reference__{ip_selected}",
+                help="선택 IP보다 뒤에 방영한 IP를 비교군에서 제외하고 순위/평균비를 계산합니다."
+            )
+        year_filter_col = filter_cols[2]
+        comp_filter_col = filter_cols[3]
+    else:
+        limit_to_reference_ip = False
+        year_filter_col = filter_cols[1]
+        comp_filter_col = filter_cols[2]
     
     with st.expander("ℹ️ 지표 기준 안내", expanded=False):
         st.markdown("<div class='gd-guideline'>", unsafe_allow_html=True)
@@ -1663,7 +1743,7 @@ def render_ip_detail():
         except:
             all_years = sorted([str(x) for x in unique_vals], reverse=True)
 
-    with filter_cols[1]:
+    with year_filter_col:
         selected_years = st.multiselect(
             "방영 연도",
             all_years,
@@ -1672,7 +1752,7 @@ def render_ip_detail():
             label_visibility="collapsed"
         )
 
-    with filter_cols[2]:
+    with comp_filter_col:
         comp_options = ["동일 편성", "전체", "월화", "수목", "토일", "평일"]
         default_comp = "평일" if (sel_prog == "수목") else "동일 편성"
         comp_type = st.selectbox(
@@ -1717,6 +1797,18 @@ def render_ip_detail():
     base_raw = base_raw[base_raw["IP"].isin(aired_ips) | (base_raw["IP"] == ip_selected)]
     
     group_name_parts = []
+
+    # Master/admin 전용: 선택 IP보다 뒤에 방영한 IP는 비교군에서 제외
+    if limit_to_reference_ip:
+        start_map = _ip_start_date_map(df_full)
+        target_start_dt = start_map.get(ip_selected, pd.NaT) if not start_map.empty else pd.NaT
+
+        if pd.notna(target_start_dt):
+            base_ip_start = base_raw["IP"].map(start_map)
+            base_raw = base_raw[(base_raw["IP"] == ip_selected) | base_ip_start.isna() | (base_ip_start <= target_start_dt)].copy()
+            group_name_parts.append("기준IP까지")
+        else:
+            st.warning("선택 IP의 방영시작일을 확인할 수 없어 '기준IP까지만 보기' 필터는 적용하지 않았습니다.", icon="⚠️")
 
     if comp_prog_filter is not None:
         if use_same_prog and not sel_prog:
