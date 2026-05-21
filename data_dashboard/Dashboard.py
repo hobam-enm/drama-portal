@@ -543,26 +543,43 @@ VIEW_METRIC_KO = "한글제목 조회수"
 VIEW_METRIC_EN = "영문제목 조회수"
 VIEW_SEARCH_TYPE_KO = "한글제목"
 VIEW_SEARCH_TYPE_EN = "영어제목"
+VIEW_SEARCH_TYPE_TOTAL = "한글+영문제목"
 
 
 def _is_view_metric(metric_name) -> bool:
-    """코드 내부에서는 한글/영문 제목 조회수를 분리하되, 원본 RAW metric은 조회수로 유지합니다."""
+    """코드 내부에서는 한글/영문/합산 조회수를 모두 조회수 계열로 처리합니다."""
     return str(metric_name).strip() in {VIEW_METRIC_RAW, VIEW_METRIC_KO, VIEW_METRIC_EN}
 
 def _view_search_type_for_metric(metric_name) -> str:
     """내부 조회수 metric명에 따라 세부속성3 검색 기준을 반환합니다."""
-    return VIEW_SEARCH_TYPE_EN if str(metric_name).strip() == VIEW_METRIC_EN else VIEW_SEARCH_TYPE_KO
+    metric_name = str(metric_name).strip()
+    if metric_name == VIEW_METRIC_EN:
+        return VIEW_SEARCH_TYPE_EN
+    if metric_name == VIEW_METRIC_KO:
+        return VIEW_SEARCH_TYPE_KO
+    return VIEW_SEARCH_TYPE_TOTAL
 
-def _get_view_data(df: pd.DataFrame, search_type_value: str = VIEW_SEARCH_TYPE_KO) -> pd.DataFrame:
+def _get_view_data(df: pd.DataFrame, search_type_value: str = VIEW_SEARCH_TYPE_TOTAL) -> pd.DataFrame:
     """
     제목 기준별 조회수만 필터링하는 공통 유틸.
-    - RAW metric은 '조회수'를 유지합니다.
+    - 기본 조회수는 한글제목+영문제목을 합산 대상으로 반환합니다.
     - 한글제목 조회수는 세부속성3 == '한글제목'인 행만 사용합니다.
     - 영문제목 조회수는 세부속성3 == '영어제목'인 행만 사용합니다.
     - 한글제목 조회수만 유튜브 세부속성1 PGC/UGC 제한을 적용합니다.
     - 영문제목 조회수는 유튜브여도 세부속성1 조건을 적용하지 않습니다.
     - 사용자 화면의 기존 조회수 표기는 그대로 유지합니다.
     """
+    if search_type_value in (VIEW_SEARCH_TYPE_TOTAL, None, ""):
+        parts = [
+            _get_view_data(df, VIEW_SEARCH_TYPE_KO),
+            _get_view_data(df, VIEW_SEARCH_TYPE_EN),
+        ]
+        parts = [p for p in parts if p is not None and not p.empty]
+        if parts:
+            return pd.concat(parts, ignore_index=True)
+        sub = df[df["metric"] == VIEW_METRIC_RAW].copy() if "metric" in df.columns else pd.DataFrame()
+        return sub.iloc[0:0].copy()
+
     sub = df[df["metric"] == VIEW_METRIC_RAW].copy()
     if sub.empty:
         return sub
@@ -587,7 +604,7 @@ def _get_view_data(df: pd.DataFrame, search_type_value: str = VIEW_SEARCH_TYPE_K
     return sub
 
 def _get_view_data_for_metric(df: pd.DataFrame, metric_name) -> pd.DataFrame:
-    """VIEW_METRIC_KO/VIEW_METRIC_EN 내부명에 맞는 조회수 subset을 반환합니다."""
+    """VIEW_METRIC_RAW/KO/EN 내부명에 맞는 조회수 subset을 반환합니다."""
     return _get_view_data(df, _view_search_type_for_metric(metric_name))
 
 # ===== 3.5. 집계 계산 유틸 =====
@@ -1313,7 +1330,7 @@ def render_overview():
     tving_quick= avg_of_ip_tving_quick()        
     tving_vod  = avg_of_ip_tving_vod_weekly()   
 
-    digital_view = avg_of_ip_sums(VIEW_METRIC_KO)
+    digital_view = avg_of_ip_sums(VIEW_METRIC_RAW)
     digital_view_en = avg_of_ip_sums(VIEW_METRIC_EN)
     digital_buzz = avg_of_ip_sums("언급량")
     f_score      = avg_of_ip_means("F_Score")
@@ -2981,7 +2998,7 @@ def get_agg_kpis_for_ip_page4(df_ip: pd.DataFrame) -> Dict[str, float | None]:
     kpis["H시청률"] = mean_of_ip_episode_mean(df_ip, "H시청률")
     kpis["TVING VOD"] = mean_tving_vod_combined_on_vod_eps(df_ip)
     kpis["TVING LIVE"] = mean_of_ip_episode_sum(df_ip, "시청인구", ["TVING LIVE"])
-    kpis["디지털 조회수"] = mean_of_ip_sums(df_ip, VIEW_METRIC_KO)
+    kpis["디지털 조회수"] = mean_of_ip_sums(df_ip, VIEW_METRIC_RAW)
     kpis["디지털 언급량"] = mean_of_ip_sums(df_ip, "언급량")
     kpis["화제성 점수"] = mean_of_ip_episode_mean(df_ip, "F_Score")
     return kpis
@@ -3198,7 +3215,7 @@ def _render_unified_charts(df_target, df_comp, target_name, comp_name, kpi_perce
         radar_map = {
             "T시청률": "타깃시청률", "H시청률": "가구시청률", 
             "TVING LIVE": "티빙 LIVE", "TVING VOD": "티빙 VOD", 
-            "디지털 조회수": VIEW_METRIC_KO, "디지털 언급량": "언급량", "화제성 점수": "화제성"
+            "디지털 조회수": VIEW_METRIC_RAW, "디지털 언급량": "언급량", "화제성 점수": "화제성"
         }
         radar_metrics = list(radar_map.keys())
         radar_labels = list(radar_map.values())
@@ -3391,8 +3408,8 @@ def _render_unified_charts(df_target, df_comp, target_name, comp_name, kpi_perce
 
     with col_dig_view:
         st.markdown("###### 👀 디지털 조회수 비교")
-        pie_t = _get_pie_data(df_target, VIEW_METRIC_KO)
-        pie_c = _get_pie_data(df_comp,   VIEW_METRIC_KO)
+        pie_t = _get_pie_data(df_target, VIEW_METRIC_RAW)
+        pie_c = _get_pie_data(df_comp,   VIEW_METRIC_RAW)
         if pie_t.empty and pie_c.empty: st.info("데이터 없음")
         else:
             fig_pie = _draw_scaled_donuts_fixed_color(pie_t, pie_c, "조회수", target_name, comp_name)
@@ -3710,7 +3727,7 @@ METRICS_DEF_BROADCAST = [
 
 # 디지털용 정의 (Display, Metric, AggFunc, UseSlope)
 METRICS_DEF_DIGITAL = [
-    ("조회수", VIEW_METRIC_KO, "sum", True),
+    ("조회수", VIEW_METRIC_RAW, "sum", True),
     ("화제성", "F_Score", "mean", True),
 ]
 
@@ -4510,7 +4527,7 @@ def render_pre_launch_analysis():
 
     st.markdown("###### 💻 사전 디지털 반응 (W-6 ~ W-1)")
     c_d1, c_d2 = st.columns(2)
-    with c_d1: _draw_trend_line_chart(VIEW_METRIC_KO, "조회수 합계", WEEKS_DIGITAL)
+    with c_d1: _draw_trend_line_chart(VIEW_METRIC_RAW, "조회수 합계", WEEKS_DIGITAL)
     with c_d2: _draw_trend_line_chart("언급량", "언급량 합계", WEEKS_DIGITAL)
 
 
@@ -4629,18 +4646,18 @@ def render_pre_launch_analysis():
         view_mom = v_pv.get("W-1", 0) - v_pv.get("W-3", 0)
         buzz_mom = b_pv.get("W-1", 0) - b_pv.get("W-3", 0)
 
-        dig_feats[f"log1p_{VIEW_METRIC_KO}_sum_W-6_W-1"] = np.log1p(view_sum.clip(lower=0))
+        dig_feats[f"log1p_{VIEW_METRIC_RAW}_sum_W-6_W-1"] = np.log1p(view_sum.clip(lower=0))
         dig_feats["log1p_언급량_sum_W-6_W-1"] = np.log1p(buzz_sum.clip(lower=0))
-        dig_feats[f"log1p_{VIEW_METRIC_KO}_level_W-1"]   = np.log1p(pd.Series(view_w1, index=meta.index).clip(lower=0))
+        dig_feats[f"log1p_{VIEW_METRIC_RAW}_level_W-1"]   = np.log1p(pd.Series(view_w1, index=meta.index).clip(lower=0))
         dig_feats["log1p_언급량_level_W-1"]   = np.log1p(pd.Series(buzz_w1, index=meta.index).clip(lower=0))
 
         # 모멘텀은 음수도 가능하므로 signed-log1p로 변환
-        dig_feats[f"slog_{VIEW_METRIC_KO}_mom_W-1_minus_W-3"] = np.sign(view_mom) * np.log1p(np.abs(view_mom))
+        dig_feats[f"slog_{VIEW_METRIC_RAW}_mom_W-1_minus_W-3"] = np.sign(view_mom) * np.log1p(np.abs(view_mom))
         dig_feats["slog_언급량_mom_W-1_minus_W-3"] = np.sign(buzz_mom) * np.log1p(np.abs(buzz_mom))
 
         # 데이터 커버리지(주차가 덜 쌓인 IP에 대한 과대추정 완화용)
         # 0이 '실제로 0'일 수도 있지만, 사전 구간에서 완전 0이 반복되면 정보가 부족한 케이스가 많아 보정에 도움이 됨.
-        dig_feats[f"{VIEW_METRIC_KO}_week_coverage_W-6_W-1"] = (v_pv.fillna(0) > 0).mean(axis=1)
+        dig_feats[f"{VIEW_METRIC_RAW}_week_coverage_W-6_W-1"] = (v_pv.fillna(0) > 0).mean(axis=1)
         dig_feats["언급량_week_coverage_W-6_W-1"] = (b_pv.fillna(0) > 0).mean(axis=1)
 
         # ---- (4) 타깃: 1주차 화제성 점수(F_Score) ----
@@ -4813,7 +4830,7 @@ def render_pre_launch_analysis():
                         s = s.replace("_W-6_W-1", " (W-6~W-1)")
                         s = s.replace("_W-1_minus_W-3", " (W-1 - W-3)")
                         s = s.replace("_W-1", " (W-1)")
-                        s = s.replace(VIEW_METRIC_KO, "조회수")
+                        s = s.replace(VIEW_METRIC_KO, "조회수").replace(VIEW_METRIC_RAW, "조회수")
                         s = s.replace("_", " ")
                         s = s.replace("sum", "총량").replace("level", "마지막값").replace("mom", "최근변화").replace("slope", "추세").replace("minus", "-")
                         return s
@@ -4940,7 +4957,7 @@ def render_pre_launch_analysis():
                 v = _get_view_data(_df).copy()
                 v = v[v["주차"].astype(str).apply(lambda w: _week_leq(str(w), cutoff))]
                 v["val"] = pd.to_numeric(v.get("value"), errors="coerce").fillna(0)
-                v["metric"] = VIEW_METRIC_KO
+                v["metric"] = VIEW_METRIC_RAW
                 frames.append(v[["IP","주차","metric","val"]])
             except Exception:
                 pass
