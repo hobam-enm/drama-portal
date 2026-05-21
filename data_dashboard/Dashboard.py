@@ -1349,8 +1349,8 @@ def render_overview():
     kpi_tooltip(c6, "⚓ 앵커드라마", f"{anchor_total}작품", anchor_tooltip)
     
     # --- 2행 ---
-    kpi(c7, "👀 디지털 조회수", fmt(digital_view, intlike=True))
-    kpi(c8, "🌐 디지털 조회수(영제)", fmt(digital_view_en, intlike=True))
+    kpi(c7, "👀 총 조회수", fmt(digital_view, intlike=True))
+    kpi(c8, "🌐 해외 UGC 조회수", fmt(digital_view_en, intlike=True))
     kpi(c9, "💬 디지털 언급량", fmt(digital_buzz, intlike=True))
     kpi(c10, "🔥 화제성 점수",  fmt(f_score, intlike=True))
     kpi(c11, "🥇 펀덱스 1위", f"{fundex_top1}작품")
